@@ -12,13 +12,7 @@ import {
 } from "@/data/characters";
 import { setLastSelectedChatNext } from "@/components/entry/EntrySelectionTracker";
 
-function Chip({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-full border border-border bg-secondary px-3 py-1 text-[11px] font-medium text-secondary-foreground">
-      {children}
-    </span>
-  );
-}
+import FadeIn from "@/components/ui/entry/FadeIn";
 
 function buildNextPathForCharacterId(characterId: string) {
   const ch = CHARACTERS[characterId];
@@ -34,7 +28,7 @@ function buildNextPathForCharacterId(characterId: string) {
 function HeroCharacterButton({
   characterId,
   label,
-  verb = "話す",
+  verb = "と話す",
   className,
   showAvatar = false,
 }: {
@@ -58,7 +52,8 @@ function HeroCharacterButton({
         </span>
       ) : null}
       <span className="text-center leading-tight">
-        {label}と{verb}
+        {label}
+        {verb}
       </span>
     </span>
   );
@@ -84,12 +79,7 @@ function HeroCharacterButton({
       <span className="flex w-full items-center justify-center gap-2">
         {showAvatar && avatarSrc ? (
           <span className="relative h-7 w-7 overflow-hidden rounded-full border border-border bg-secondary">
-            <Image
-              src={avatarSrc}
-              alt=""
-              fill
-              className="object-cover opacity-60"
-            />
+            <Image src={avatarSrc} alt="" fill className="object-cover opacity-60" />
           </span>
         ) : null}
         <span className="whitespace-nowrap">{label}（準備中）</span>
@@ -109,75 +99,86 @@ export default function EntryHeroSection() {
   }, []);
 
   return (
-    
-      <section
-        id="entry-hero"
-        data-entry-section="hero"
-        className="relative mx-auto w-full max-w-6xl overflow-hidden rounded-3xl bg-transparent"
+    <section
+      id="entry-hero"
+      data-entry-section="hero"
+      className="relative mx-auto w-full max-w-6xl overflow-hidden rounded-3xl bg-transparent"
+    >
+      <div className="relative aspect-[3/2] w-full" />
+
+      <div
+        className={`absolute inset-0 fixed ${style.page} ${visible ? style["page--visible"] : ""} top-0 aspect-[3/2] lg:w-full lg:max-w-6xl`}
       >
-        <div className="relative aspect-[3/2] w-full">
-          {/*imageのスペース*/}
-        </div>
-        <div
-          className={`absolute inset-0 fixed ${style.page} ${visible ? style["page--visible"] : ""} top-0 aspect-[3/2] lg:w-full lg:max-w-6xl`}
-        >
-          <Image
-            src="/entry/hero.png"
-            alt="魔理沙・霊夢・アリス"
-            fill
-            priority
-            className="object-contain"
-          />
-
-          <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-6 sm:px-10">
-            <div className="mx-auto grid w-full grid-cols-3 gap-2 sm:grid-cols-[1fr_minmax(0,14rem)_1fr_minmax(0,14rem)_1fr_minmax(0,14rem)_1fr] sm:gap-0">
-              <HeroCharacterButton
-                characterId="marisa"
-                label="魔理沙"
-                verb="対話する"
-                showAvatar
-                className="w-full rounded-2xl border border-border bg-card/80 px-3 py-4 text-[12px] font-semibold text-card-foreground shadow-lg shadow-black/20 backdrop-blur hover:bg-card active:bg-card/90 sm:col-start-2 sm:px-4 sm:text-sm"
-              />
-              <HeroCharacterButton
-                characterId="reimu"
-                label="霊夢"
-                verb="対話する"
-                showAvatar
-                className="w-full rounded-2xl border border-border bg-card/80 px-3 py-4 text-[12px] font-semibold text-card-foreground shadow-lg shadow-black/20 backdrop-blur hover:bg-card active:bg-card/90 sm:col-start-4 sm:px-4 sm:text-sm"
-              />
-              <HeroCharacterButton
-                characterId="alice"
-                label="アリス"
-                verb="対話する"
-                showAvatar
-                className="w-full rounded-2xl border border-border bg-card/80 px-3 py-4 text-[12px] font-semibold text-card-foreground shadow-lg shadow-black/20 backdrop-blur hover:bg-card active:bg-card/90 sm:col-start-6 sm:px-4 sm:text-sm"
+        <div className="absolute inset-0 grid grid-cols-3">
+          <FadeIn direction="left" delay={0.9}>
+            <div className="relative h-full w-full overflow-hidden">
+              <Image
+                src="/entry/hero-marisa.png"
+                alt="霧雨魔理沙"
+                fill
+                priority
+                sizes="(max-width: 1024px) 33vw, 33vw"
+                className="lg:ml-12 object-contain object-left"
               />
             </div>
-          </div>
+          </FadeIn>
 
-          <div className="absolute inset-x-0 bottom-0 p-4 sm:p-6">
-            <div className="hidden rounded-2xl border border-border bg-card/85 p-5 shadow-sm lg:block">
-              <div className="text-xs font-medium text-muted-foreground">
-                Touhou Talk
-              </div>
-              <h1 className="mt-2 font-gensou text-2xl tracking-wide sm:text-3xl">
-                東方キャラと“ちゃんと会話できる”体験。
-              </h1>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                キャラクターを選択し、ログイン後すぐに会話を開始できます。
-              </p>
-
+          <FadeIn direction="top" delay={1.4}>
+            <div className="relative h-full w-full overflow-hidden">
+              <Image
+                src="/entry/hero-reimu.png"
+                alt="博麗霊夢"
+                fill
+                priority
+                sizes="(max-width: 1024px) 33vw, 33vw"
+                className="object-contain object-center"
+              />
             </div>
+          </FadeIn>
+
+          <FadeIn direction="right" delay={1.9}>
+            <div className="relative h-full w-full overflow-hidden">
+              <Image
+                src="/entry/hero-arice.png"
+                alt="アリス・マーガトロイド"
+                fill
+                priority
+                sizes="(max-width: 1024px) 33vw, 33vw"
+                className="lg:-ml-12 object-contain object-right"
+              />
+            </div>
+          </FadeIn>
+        </div>
+
+        <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 px-6 sm:px-10">
+          <div className="mx-auto grid w-full grid-cols-3 gap-2 sm:grid-cols-[1fr_minmax(0,14rem)_1fr_minmax(0,14rem)_1fr_minmax(0,14rem)_1fr] sm:gap-0">
+            <HeroCharacterButton
+              characterId="marisa"
+              label="魔理沙"
+              showAvatar
+              className="w-full rounded-2xl border border-border bg-card/80 px-3 py-4 text-[12px] font-semibold text-card-foreground shadow-lg shadow-black/20 backdrop-blur hover:bg-card active:bg-card/90 sm:col-start-2 sm:px-4 sm:text-sm"
+            />
+            <HeroCharacterButton
+              characterId="reimu"
+              label="霊夢"
+              showAvatar
+              className="w-full rounded-2xl border border-border bg-card/80 px-3 py-4 text-[12px] font-semibold text-card-foreground shadow-lg shadow-black/20 backdrop-blur hover:bg-card active:bg-card/90 sm:col-start-4 sm:px-4 sm:text-sm"
+            />
+            <HeroCharacterButton
+              characterId="alice"
+              label="アリス"
+              showAvatar
+              className="w-full rounded-2xl border border-border bg-card/80 px-3 py-4 text-[12px] font-semibold text-card-foreground shadow-lg shadow-black/20 backdrop-blur hover:bg-card active:bg-card/90 sm:col-start-6 sm:px-4 sm:text-sm"
+            />
           </div>
         </div>
 
-        {/* SP/Tablet: move the text card under the hero image (no overlap) */}
-        <div className="lg:mt-4 -mt-4 px-4 sm:px-6 lg:hidden">
-          <div className="rounded-2xl border border-border bg-card/90 p-5 shadow-sm">
+        <div className="absolute inset-x-0 bottom-0 p-4 sm:p-6">
+          <div className="hidden rounded-2xl border border-border bg-card/85 p-5 shadow-sm lg:block">
             <div className="text-xs font-medium text-muted-foreground">
               Touhou Talk
             </div>
-            <h1 className="mt-2 font-gensou text-2xl tracking-wide">
+            <h1 className="mt-2 font-gensou text-2xl tracking-wide sm:text-3xl">
               東方キャラと“ちゃんと会話できる”体験。
             </h1>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
@@ -185,6 +186,22 @@ export default function EntryHeroSection() {
             </p>
           </div>
         </div>
-      </section>
+      </div>
+
+      <div className="lg:mt-4 -mt-4 px-4 sm:px-6 lg:hidden">
+        <div className="rounded-2xl border border-border bg-card/90 p-5 shadow-sm">
+          <div className="text-xs font-medium text-muted-foreground">
+            Touhou Talk
+          </div>
+          <h1 className="mt-2 font-gensou text-2xl tracking-wide">
+            東方キャラと“ちゃんと会話できる”体験。
+          </h1>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            キャラクターを選択し、ログイン後すぐに会話を開始できます。
+          </p>
+        </div>
+      </div>
+    </section>
   );
 }
+
