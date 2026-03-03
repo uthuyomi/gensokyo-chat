@@ -87,3 +87,30 @@ UI 側で `persona_system` 末尾に **ターン限定の上書きブロック**
 - `character_id` ごとに overlay の辞書を追加（intent×style の組を増やす）
 - テストケース（意図別の期待）を増やして劣化を検知する
 
+## 品質テスト（履歴をファイルに残す）
+
+ローカルで 20 ケースを回して、会話履歴を `touhou-talk-ui/artifacts/` に保存します。
+
+前提:
+- `sigmaris-core` が起動している（例: `http://127.0.0.1:8000`）
+- `OPENAI_API_KEY` が core 側で設定されている
+
+実行例:
+
+```bash
+# core URL を指定（必要なら）
+set SIGMARIS_CORE_URL=http://127.0.0.1:8000
+
+# TS/JSON import を素直に動かすため tsx で実行
+npx --yes tsx touhou-talk-ui/tools/reimu_quality_runner.ts --take 20
+```
+
+出力:
+- `touhou-talk-ui/artifacts/reimu_quality/<timestamp>/run.md`
+- `touhou-talk-ui/artifacts/reimu_quality/<timestamp>/run.jsonl`
+
+### 2026-03-04 追記（安定化）
+- `sigmaris-core` の `/persona/intent` は `gpt-5.*` 系で `max_tokens` が 400 になるため、`max_completion_tokens` 優先に変更。
+- `needs_clarify=true` のときは UI 側で **clarify_question をそのまま返す**（short-circuit）ようにして、余計な生成/書き換えを避ける。
+- `output_style` の違反に対して **追加のLLM呼び出しで書き換えない**（ローカルで最小整形のみ）ようにし、二段階生成による遅延/揺れを抑える。
+- `normal` の末尾「必ず質問で終える」強制は撤廃（不自然な詮索質問を減らし、書き換え誘発も抑える）。

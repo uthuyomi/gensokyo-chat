@@ -153,8 +153,8 @@ function outputStyleBlock(style: PersonaOutputStyle, intent: PersonaIntentRespon
   }
   return [
     "# Output style (FORCED)",
-    "- 1〜10文（短め）。長文/解説は禁止。",
-    "- 最後は必ず質問1つで止める（「？」で終える）。",
+    "- 1〜7文（短め）。長文/解説は禁止。",
+    "- 箇条書き/候補列挙は最大3つまで（それ以上は1文でまとめる）。",
   ].join("\n");
 }
 
@@ -195,6 +195,7 @@ function reimuDirectorOverlay(intent: PersonaIntentResponse): string {
       "# Incident handling",
       "- 「また異変？」の低テンションから入って、最小3手で片付け方を出す。",
       "- 断言しすぎない。足りない情報は質問1つで補う。",
+      "- 原因候補の列挙は最大3つまで（長い羅列・番号リスト禁止）。",
     );
   } else if (intent.intent === "lore") {
     base.push(
@@ -215,6 +216,8 @@ function reimuDirectorOverlay(intent: PersonaIntentResponse): string {
       "",
       "# Advice/task handling",
       "- 実務的に。3手まで。感情の断定/心理分析/長文はしない。",
+      "- 候補列挙や手順は最大3つ。4つ以上は出さない。",
+      "- 質問は1つだけ。心情の二択/三択で分類させない（事実を1つ聞く）。",
     );
   } else if (intent.intent === "banter") {
     base.push(
@@ -281,74 +284,78 @@ function lintOutputStyle(params: {
 
   // normal
   const lines = raw.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (params.intent?.intent === "safety") {
+    // Safety replies may include resources; do not enforce brevity/question-ending.
+    if (lines.length > 40) return { ok: false, reason: "normal_too_long" };
+    return { ok: true, reason: "" };
+  }
   if (lines.length > 10) return { ok: false, reason: "normal_too_long" };
-  const joined = lines.join(" ");
-  if (!/[？?]\s*$/.test(joined)) return { ok: false, reason: "normal_no_question_end" };
   return { ok: true, reason: "" };
 }
 
-async function rewriteToForcedStyle(params: {
-  base: string;
-  accessToken: string | null;
-  userId: string;
-  sessionId: string;
-  characterId: string;
-  chatMode: TouhouChatMode;
-  personaSystem: string;
-  gen: Record<string, unknown>;
-  attachments: Record<string, unknown>[];
-  history: Array<{ role: "user" | "assistant"; content: string }>;
-  originalUserText: string;
-  draftReply: string;
+function coerceToForcedStyle(params: {
+  style: PersonaOutputStyle;
   intent: PersonaIntentResponse;
-}): Promise<PersonaChatResponse | null> {
-  const style = effectiveOutputStyle(params.intent);
-  const fix = [
-    "# Output style fix (FORCED, internal)",
-    "- The previous reply violated the forced output style.",
-    "- Rewrite the DRAFT to match the forced style exactly.",
-    "- Preserve meaning as much as possible; do not add new facts.",
-    "- Do NOT mention rewriting, DRAFT, or internal rules.",
-    "- Output only the final reply text.",
-    "",
-    outputStyleBlock(style, params.intent),
-  ].join("\n");
+  reply: string;
+}): { reply: string; applied: boolean } {
+  const style = params.style;
+  const raw = String(params.reply ?? "").trim();
+  if (!raw) return { reply: raw, applied: false };
 
-  const rewriteMessage = [
-    "【内部】次のDRAFTを、指示に従って書き換えてください。",
-    "ユーザーの発話（参考）:",
-    clampText(params.originalUserText, 600),
-    "",
-    "DRAFT:",
-    clampText(params.draftReply, 1500),
-  ].join("\n");
-
-  try {
-    const r = await fetch(`${params.base}/persona/chat`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(params.accessToken ? { Authorization: `Bearer ${params.accessToken}` } : {}),
-      },
-      body: JSON.stringify({
-        user_id: params.userId,
-        session_id: params.sessionId,
-        message: rewriteMessage,
-        history: params.history,
-        character_id: params.characterId,
-        chat_mode: params.chatMode,
-        persona_system: `${params.personaSystem}\n\n${fix}`,
-        gen: params.gen,
-        attachments: params.attachments,
-      }),
-    });
-    if (!r.ok) return null;
-    const data = (await r.json()) as PersonaChatResponse;
-    if (!data || typeof data.reply !== "string") return null;
-    return data;
-  } catch {
-    return null;
+  if (params.intent.needs_clarify && (params.intent.clarify_question || "").trim()) {
+    return { reply: String(params.intent.clarify_question).trim(), applied: true };
   }
+
+  if (style === "normal") {
+    const lines = raw
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (lines.length > 10) {
+      const compact = lines.join(" ").replace(/\s+/g, " ").trim();
+      return { reply: compact, applied: compact !== raw };
+    }
+    return { reply: raw, applied: false };
+  }
+
+  if (style === "bullet_3") {
+    const lines = raw
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const bullets = lines.filter((l) => l.startsWith("- ")).map((l) => l.replace(/\s+/g, " ").trim());
+    const picked = (bullets.length ? bullets : lines)
+      .join(" ")
+      .split(/[。！？?!\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 3);
+    if (picked.length === 3) {
+      return { reply: picked.map((t) => (t.startsWith("- ") ? t : `- ${t}`)).join("\n"), applied: true };
+    }
+    return { reply: raw, applied: false };
+  }
+
+  if (style === "choice_2") {
+    const lines = raw
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const a = lines.find((l) => l.startsWith("A)")) ?? null;
+    const b = lines.find((l) => l.startsWith("B)")) ?? null;
+    if (a && b) return { reply: `${a}\n${b}`, applied: true };
+
+    const picked = lines
+      .join(" ")
+      .split(/[。！？?!\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 2);
+    if (picked.length === 2) return { reply: `A) ${picked[0]}\nB) ${picked[1]}`, applied: true };
+    return { reply: raw, applied: false };
+  }
+
+  return { reply: raw, applied: false };
 }
 
 /* =========================================================
@@ -433,6 +440,19 @@ function sanitizeReplyByContext(params: {
       );
       out = out.replace(/\n{3,}/g, "\n\n").trim();
       if (!out) out = before;
+    }
+  }
+
+  // 4) Reimu: avoid “心情の分類（二択）”質問がカウンセラーっぽくなるのを抑える
+  if (params.chatMode === "roleplay" && params.characterId === "reimu") {
+    // If the exchange is about tiredness/low energy, don't force the user into “A or B”.
+    // Replace with a single concrete question.
+    const fatigue = /(疲れ|だる|しんど|モヤモヤ|憂鬱|眠|やる気)/i;
+    if (fatigue.test(lowerRecentUser)) {
+      out = out.replace(
+        /(疲れ|だる|しんど|モヤモヤ|憂鬱|眠|やる気)[^。\n]{0,120}(?:どっち寄り|どっちに近い)[？?]/g,
+        "で、いま一番面倒なのは何？",
+      );
     }
   }
 
@@ -1194,6 +1214,88 @@ export async function POST(
   const gen = genParamsFor(characterId);
   const streamMode = wantsStream(req);
 
+  // Clarify short-circuit: when the intent director asks for a single confirm-question,
+  // return it directly (saves latency/cost and prevents style drift).
+  if (intent?.needs_clarify && (intent.clarify_question || "").trim()) {
+    const replyFinal = String(intent.clarify_question || "").trim();
+
+    const mergedMeta = mergeMeta(null, {
+      persona_system_sha256: personaSystemSha256,
+      chat_mode: chatMode,
+      character_id: characterId,
+      seed_turn: isSeedTurn,
+      director_overlay: true,
+      intent: intent.intent,
+      intent_confidence: intent.confidence,
+      intent_output_style: intent.output_style,
+      intent_effective_output_style: effectiveOutputStyle(intent),
+      intent_allowed_humor: intent.allowed_humor,
+      intent_urgency: intent.urgency,
+      intent_needs_clarify: intent.needs_clarify,
+      intent_safety_risk: intent.safety_risk,
+      forced_output_style_passed: true,
+      forced_output_style_retry: false,
+      forced_output_style_reason: "clarify_short_circuit",
+    });
+
+    const { error: aiInsertError } = await supabase.from("common_messages").insert({
+      session_id: sessionId,
+      user_id: userId,
+      app: "touhou",
+      role: "ai",
+      content: replyFinal,
+      speaker_id: characterId,
+      meta: mergedMeta,
+    });
+
+    if (aiInsertError) {
+      console.error("[touhou] ai message insert error:", aiInsertError);
+      return NextResponse.json({ error: "Failed to save ai message" }, { status: 500 });
+    }
+
+    if (isRecord(mergedMeta)) {
+      try {
+        await supabase.from("common_state_snapshots").insert([
+          toStateSnapshotRow({
+            userId,
+            sessionId,
+            meta: mergedMeta as Record<string, unknown>,
+          }),
+        ]);
+      } catch (e) {
+        console.warn("[touhou] state snapshot insert failed:", e);
+      }
+    }
+
+    if (!streamMode) {
+      return NextResponse.json({ role: "ai", content: replyFinal, meta: mergedMeta });
+    }
+
+    const ts = new TransformStream();
+    const writer = ts.writable.getWriter();
+    try {
+      await writer.write(toSse("start", { sessionId }));
+      await writer.write(toSse("delta", { text: replyFinal }));
+      await writer.write(toSse("done", { reply: replyFinal, meta: mergedMeta }));
+    } catch {
+      // ignore
+    } finally {
+      try {
+        await writer.close();
+      } catch {
+        // ignore
+      }
+    }
+
+    return new NextResponse(ts.readable, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+    });
+  }
+
   if (!streamMode) {
     const r = await fetch(`${base}/persona/chat`, {
       method: "POST",
@@ -1246,38 +1348,17 @@ export async function POST(
         forcedStylePassed = false;
         forcedStyleReason = lint1.reason;
 
-        const rewritten = await rewriteToForcedStyle({
-          base,
-          accessToken,
-          userId,
-          sessionId,
-          characterId,
-          chatMode,
-          personaSystem: personaSystemWithRetrieval,
-          gen,
-          attachments: coreAttachments,
-          history: coreHistory,
-          originalUserText: text,
-          draftReply: replyFinal,
-          intent,
-        });
-
-        if (rewritten && typeof rewritten.reply === "string" && rewritten.reply.trim()) {
-          const rewrittenGuarded = sanitizeReplyByContext({
-            characterId,
-            chatMode,
-            reply: rewritten.reply,
-            history: coreHistory,
-            currentUserText: text,
-          });
-          const lint2 = lintOutputStyle({ style, intent, reply: rewrittenGuarded });
+        // No extra LLM call: do a minimal local coercion to the forced style.
+        const coerced = coerceToForcedStyle({ style, intent, reply: replyFinal });
+        if (coerced.applied) {
+          const lint2 = lintOutputStyle({ style, intent, reply: coerced.reply });
           forcedStyleRetry = true;
           if (lint2.ok) {
             forcedStylePassed = true;
             forcedStyleReason = "";
-            replyFinal = rewrittenGuarded;
+            replyFinal = coerced.reply;
           } else {
-            forcedStyleReason = `rewrite_${lint2.reason}`;
+            forcedStyleReason = `coerce_${lint2.reason}`;
           }
         }
       }
@@ -1471,38 +1552,16 @@ export async function POST(
                     forcedStylePassed = false;
                     forcedStyleReason = lint1.reason;
 
-                    const rewritten = await rewriteToForcedStyle({
-                      base,
-                      accessToken,
-                      userId,
-                      sessionId,
-                      characterId,
-                      chatMode,
-                      personaSystem: personaSystemWithRetrieval,
-                      gen,
-                      attachments: coreAttachments,
-                      history: coreHistory,
-                      originalUserText: text,
-                      draftReply: replyFinal,
-                      intent,
-                    });
-
-                    if (rewritten && typeof rewritten.reply === "string" && rewritten.reply.trim()) {
-                      const rewrittenGuarded = sanitizeReplyByContext({
-                        characterId,
-                        chatMode,
-                        reply: rewritten.reply,
-                        history: coreHistory,
-                        currentUserText: text,
-                      });
-                      const lint2 = lintOutputStyle({ style, intent, reply: rewrittenGuarded });
+                    const coerced = coerceToForcedStyle({ style, intent, reply: replyFinal });
+                    if (coerced.applied) {
+                      const lint2 = lintOutputStyle({ style, intent, reply: coerced.reply });
                       forcedStyleRetry = true;
                       if (lint2.ok) {
                         forcedStylePassed = true;
                         forcedStyleReason = "";
-                        replyFinal = rewrittenGuarded;
+                        replyFinal = coerced.reply;
                       } else {
-                        forcedStyleReason = `rewrite_${lint2.reason}`;
+                        forcedStyleReason = `coerce_${lint2.reason}`;
                       }
                     }
                   }

@@ -930,15 +930,29 @@ def _llm_intent_classify(
 ) -> Optional[Dict[str, Any]]:
     llm = _get_llm_client()
     try:
-        resp = llm.client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "Return ONLY JSON."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.0,
-            max_tokens=max(32, int(max_tokens)),
-        )
+        try:
+            resp = llm.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "Return ONLY JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                max_completion_tokens=max(32, int(max_tokens)),
+            )
+        except Exception as e:
+            # Some models use legacy `max_tokens` instead.
+            if "Unsupported parameter: 'max_completion_tokens'" not in str(e):
+                raise
+            resp = llm.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "Return ONLY JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                max_tokens=max(32, int(max_tokens)),
+            )
         msg = resp.choices[0].message
         text = (msg.content or "").strip()
         return llm._extract_json_object(text)  # best-effort JSON extraction
@@ -966,6 +980,33 @@ def _intent_fast_path(user_text: str) -> Optional[PersonaIntentResponse]:
                     output_style="normal",
                     allowed_humor=True,
                     urgency="low",
+                    needs_clarify=False,
+                    safety_risk="none",
+                )
+            # Formatting requests: encourage stable output_style without LLM ambiguity.
+            # - "2択で" / "A)B)" / "どっち" -> choice_2
+            if re.search(r"(2択|二択|A\)|B\)|どっち|どちら|選んで)", t, flags=re.IGNORECASE) and re.search(
+                r"(2択|二択|A\)|B\))", t, flags=re.IGNORECASE
+            ):
+                return PersonaIntentResponse(
+                    intent="advice",
+                    confidence=0.95,
+                    output_style="choice_2",
+                    allowed_humor=True,
+                    urgency="normal",
+                    needs_clarify=False,
+                    safety_risk="none",
+                )
+            # - "箇条書きで" / "3つ" -> bullet_3
+            if re.search(r"(箇条書き|箇条書きで|箇条書きに|リストで|列挙して)", t) and re.search(
+                r"(3つ|三つ|3個|三個|3点|三点|3項|三項)", t
+            ):
+                return PersonaIntentResponse(
+                    intent="task",
+                    confidence=0.95,
+                    output_style="bullet_3",
+                    allowed_humor=True,
+                    urgency="normal",
                     needs_clarify=False,
                     safety_risk="none",
                 )
@@ -1089,12 +1130,8 @@ async def persona_intent(req: PersonaIntentRequest, auth: Optional[AuthContext] 
     # Character-scoped polish: keep clarify question in-character when possible (no extra inference).
     try:
         if parsed.needs_clarify and (req.character_id or "").strip() == "reimu" and (req.chat_mode or "").strip() == "roleplay":
-            q = (parsed.clarify_question or "").strip()
-            if not q or q == "もう少しだけ状況を教えて。何が起きてるの？":
-                q = "で、何があったのよ？"
-            if not q.endswith(("？", "?")):
-                q = q + "？"
-            parsed.clarify_question = q
+            # Hard rule for Reimu roleplay: ONE short confirm-question only (avoid polite multi-question drift).
+            parsed.clarify_question = "で、何があったのよ？"
     except Exception:
         pass
 
