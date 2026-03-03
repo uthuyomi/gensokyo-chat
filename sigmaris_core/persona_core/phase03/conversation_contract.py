@@ -135,6 +135,14 @@ def should_apply_contract(md: Dict[str, Any]) -> bool:
     Avoid breaking other apps (e.g., sigmaris-os) by scoping the contract.
     Apply only when external persona injection is in use.
     """
+    # Roleplay mode prefers strict character fidelity; the contract can conflict with
+    # high-strength persona prompts (and the client already ships its own roleplay rules).
+    try:
+        cm = str(md.get("chat_mode") or "").strip().lower()
+        if cm == "roleplay":
+            return False
+    except Exception:
+        pass
     try:
         ps = md.get("persona_system")
         if isinstance(ps, str) and ps.strip():
@@ -142,4 +150,3 @@ def should_apply_contract(md: Dict[str, Any]) -> bool:
     except Exception:
         pass
     return False
-
