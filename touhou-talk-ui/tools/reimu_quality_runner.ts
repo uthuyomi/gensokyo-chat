@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 
-import { buildTouhouPersonaSystem, genParamsFor, type TouhouChatMode } from "../lib/touhouPersona";
+import { buildTouhouPersonaSystem, genParamsFor, type TouhouChatMode } from "../lib/touhouPersona.ts";
 
 type IntentLabel =
   | "banter"
@@ -81,7 +81,7 @@ function outputStyleBlock(style: OutputStyle, intent: IntentResponse): string {
       "- それ以外の行（前置き/後置き/空行）は禁止。",
     ].join("\n");
   }
-  return ["# Output style (FORCED)", "- 1〜10文（短め）。長文/解説は禁止。", "- 最後は必ず質問1つで止める（「？」で終える）。"].join("\n");
+  return ["# Output style (FORCED)", "- 1〜10文（短め）。長文/解説は禁止。"].join("\n");
 }
 
 function reimuDirectorOverlay(intent: IntentResponse): string {
@@ -135,10 +135,53 @@ function lintOutputStyle(params: { style: OutputStyle; intent: IntentResponse; r
   }
 
   const lines = raw.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (params.intent.intent === "safety") {
+    // Safety replies may include resources; don't force brevity nor question-ending.
+    if (lines.length > 40) return { ok: false, reason: "normal_too_long" };
+    return { ok: true, reason: "" };
+  }
   if (lines.length > 10) return { ok: false, reason: "normal_too_long" };
-  const joined = lines.join(" ");
-  if (!/[？?]\s*$/.test(joined)) return { ok: false, reason: "normal_no_question_end" };
   return { ok: true, reason: "" };
+}
+
+function coerceToForcedStyle(params: { style: OutputStyle; intent: IntentResponse; reply: string }): { reply: string; applied: boolean } {
+  const style = params.style;
+  const raw = String(params.reply ?? "").trim();
+  if (!raw) return { reply: raw, applied: false };
+
+  if (params.intent.needs_clarify && (params.intent.clarify_question || "").trim()) {
+    return { reply: String(params.intent.clarify_question).trim(), applied: true };
+  }
+
+  if (style === "bullet_3") {
+    const lines = raw.split("\n").map((s) => s.trim()).filter(Boolean);
+    const bullets = lines.filter((l) => l.startsWith("- ")).map((l) => l.replace(/\s+/g, " ").trim());
+    const picked = (bullets.length ? bullets : lines)
+      .join(" ")
+      .split(/[。！？?!\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 3);
+    if (picked.length === 3) return { reply: picked.map((t) => (t.startsWith("- ") ? t : `- ${t}`)).join("\n"), applied: true };
+    return { reply: raw, applied: false };
+  }
+
+  if (style === "choice_2") {
+    const lines = raw.split("\n").map((s) => s.trim()).filter(Boolean);
+    const a = lines.find((l) => l.startsWith("A)")) ?? null;
+    const b = lines.find((l) => l.startsWith("B)")) ?? null;
+    if (a && b) return { reply: `${a}\n${b}`, applied: true };
+    const picked = lines
+      .join(" ")
+      .split(/[。！？?!\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 2);
+    if (picked.length === 2) return { reply: `A) ${picked[0]}\nB) ${picked[1]}`, applied: true };
+    return { reply: raw, applied: false };
+  }
+
+  return { reply: raw, applied: false };
 }
 
 async function postJson<T>(url: string, body: unknown, headers: Record<string, string>) {
@@ -324,18 +367,20 @@ async function main() {
     const personaSystem = [personaSystemBase, `# Turn constraints\n${turnTuningLines.join("\n")}`, directorOverlay].filter(Boolean).join("\n\n");
 
     const gen = genParamsFor(characterId);
-    const data = await chatOnce({
-      base,
-      accessToken,
-      userId,
-      sessionId,
-      characterId,
-      chatMode,
-      message: userText,
-      history,
-      personaSystem,
-      gen,
-    });
+    const data: ChatResponse = intent.needs_clarify && intent.clarify_question?.trim()
+      ? { reply: intent.clarify_question.trim() }
+      : await chatOnce({
+          base,
+          accessToken,
+          userId,
+          sessionId,
+          characterId,
+          chatMode,
+          message: userText,
+          history,
+          personaSystem,
+          gen,
+        });
     const tChat = performance.now();
 
     let replyFinal = String(data.reply ?? "").trim();
@@ -347,27 +392,12 @@ async function main() {
 
     if (!lint1.ok) {
       lintFails++;
-      const rewritten = await rewriteToForcedStyle({
-        base,
-        accessToken,
-        userId,
-        sessionId,
-        characterId,
-        chatMode,
-        personaSystem,
-        gen,
-        history,
-        originalUserText: userText,
-        draftReply: replyFinal,
-        intent,
-      });
-      if (rewritten && typeof rewritten.reply === "string" && rewritten.reply.trim()) {
-        didRewrite = true;
-        rewrites++;
-        replyFinal = rewritten.reply.trim();
+      const coerced = coerceToForcedStyle({ style, intent, reply: replyFinal });
+      if (coerced.applied) {
+        replyFinal = coerced.reply.trim();
         const lint2 = lintOutputStyle({ style, intent, reply: replyFinal });
         forcedOk = lint2.ok;
-        forcedReason = lint2.reason ? `rewrite_${lint2.reason}` : "";
+        forcedReason = lint2.reason ? `coerce_${lint2.reason}` : "";
       }
     }
 
@@ -406,4 +436,3 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
-

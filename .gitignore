@@ -46,3 +46,7 @@ tools/aquestalk_tts_cmd/obj/
 tools/aquestalk_tts_cmd/*.wav
 touhou-talk-ui/tools/desktop/.bundle/
 touhou-talk-ui/dist-desktop/
+
+# === Local test artifacts ===
+tools/_runlogs/
+touhou-talk-ui/artifacts/

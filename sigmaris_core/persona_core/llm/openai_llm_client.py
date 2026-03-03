@@ -399,10 +399,31 @@ class OpenAILLMClient(LLMClientLike):
         )
 
         msg = response.choices[0].message
-        text0 = (msg.content or "").strip()
         finish_reason = getattr(response.choices[0], "finish_reason", None)
 
+        # Some models may return refusal/tool_calls with empty content; handle safely.
+        try:
+            refusal = getattr(msg, "refusal", None)
+        except Exception:
+            refusal = None
+        if isinstance(refusal, str) and refusal.strip():
+            return refusal.strip()
+
+        text0 = (msg.content or "").strip()
         if not text0:
+            try:
+                tc = getattr(msg, "tool_calls", None)
+            except Exception:
+                tc = None
+            try:
+                logging.getLogger(__name__).warning(
+                    "OpenAILLMClient: empty completion content (finish_reason=%s, has_tool_calls=%s). response_head=%s",
+                    str(finish_reason),
+                    "yes" if tc else "no",
+                    response.model_dump_json()[:800],
+                )
+            except Exception:
+                pass
             raise RuntimeError("empty completion content")
 
         if not self._should_auto_continue(finish_reason):

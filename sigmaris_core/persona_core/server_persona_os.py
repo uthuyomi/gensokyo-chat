@@ -930,15 +930,29 @@ def _llm_intent_classify(
 ) -> Optional[Dict[str, Any]]:
     llm = _get_llm_client()
     try:
-        resp = llm.client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "Return ONLY JSON."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.0,
-            max_tokens=max(32, int(max_tokens)),
-        )
+        try:
+            resp = llm.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "Return ONLY JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                max_completion_tokens=max(32, int(max_tokens)),
+            )
+        except Exception as e:
+            # Some models use legacy `max_tokens` instead.
+            if "Unsupported parameter: 'max_completion_tokens'" not in str(e):
+                raise
+            resp = llm.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "Return ONLY JSON."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                max_tokens=max(32, int(max_tokens)),
+            )
         msg = resp.choices[0].message
         text = (msg.content or "").strip()
         return llm._extract_json_object(text)  # best-effort JSON extraction
@@ -1117,10 +1131,10 @@ async def persona_intent(req: PersonaIntentRequest, auth: Optional[AuthContext] 
     try:
         if parsed.needs_clarify and (req.character_id or "").strip() == "reimu" and (req.chat_mode or "").strip() == "roleplay":
             q = (parsed.clarify_question or "").strip()
-            if not q or q == "もう少しだけ状況を教えて。何が起きてるの？":
+            # Keep it ONE short question. If the classifier produced a non-question, replace it.
+            q = (q.splitlines()[0].strip() if q else "")
+            if (not q) or ("。" in q) or (not q.endswith(("？", "?"))):
                 q = "で、何があったのよ？"
-            if not q.endswith(("？", "?")):
-                q = q + "？"
             parsed.clarify_question = q
     except Exception:
         pass
