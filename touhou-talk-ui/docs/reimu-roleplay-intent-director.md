@@ -87,3 +87,20 @@ UI 側で `persona_system` 末尾に **ターン限定の上書きブロック**
 - `character_id` ごとに overlay の辞書を追加（intent×style の組を増やす）
 - テストケース（意図別の期待）を増やして劣化を検知する
 
+## 品質テスト（履歴をファイルに残す）
+
+ローカルで 20 ケースを回して、会話履歴を `touhou-talk-ui/artifacts/` に保存します。
+
+前提:
+- `sigmaris-core` が起動している（例: `http://127.0.0.1:8000`）
+- `OPENAI_API_KEY` が core 側で設定されている
+
+実行例:
+
+```bash
+node --experimental-strip-types touhou-talk-ui/tools/reimu_quality_runner.ts --core-url http://127.0.0.1:8000 --take 20
+```
+
+出力:
+- `touhou-talk-ui/artifacts/reimu_quality/<timestamp>/run.md`
+- `touhou-talk-ui/artifacts/reimu_quality/<timestamp>/run.jsonl`

@@ -969,6 +969,33 @@ def _intent_fast_path(user_text: str) -> Optional[PersonaIntentResponse]:
                     needs_clarify=False,
                     safety_risk="none",
                 )
+            # Formatting requests: encourage stable output_style without LLM ambiguity.
+            # - "2択で" / "A)B)" / "どっち" -> choice_2
+            if re.search(r"(2択|二択|A\)|B\)|どっち|どちら|選んで)", t, flags=re.IGNORECASE) and re.search(
+                r"(2択|二択|A\)|B\))", t, flags=re.IGNORECASE
+            ):
+                return PersonaIntentResponse(
+                    intent="advice",
+                    confidence=0.95,
+                    output_style="choice_2",
+                    allowed_humor=True,
+                    urgency="normal",
+                    needs_clarify=False,
+                    safety_risk="none",
+                )
+            # - "箇条書きで" / "3つ" -> bullet_3
+            if re.search(r"(箇条書き|箇条書きで|箇条書きに|リストで|列挙して)", t) and re.search(
+                r"(3つ|三つ|3個|三個|3点|三点|3項|三項)", t
+            ):
+                return PersonaIntentResponse(
+                    intent="task",
+                    confidence=0.95,
+                    output_style="bullet_3",
+                    allowed_humor=True,
+                    urgency="normal",
+                    needs_clarify=False,
+                    safety_risk="none",
+                )
             if re.match(
                 r"^(?:了解|りょうかい|OK|ok|おけ|わかった|分かった|ありがと(?:う)?|サンキュー|thanks|thx)(?:[！!。．…]*)$",
                 phatic,

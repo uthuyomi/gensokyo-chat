@@ -1,6 +1,6 @@
-import { CHARACTERS } from "@/data/characters";
-import { OVERRIDES } from "@/lib/touhouPersona/characters";
-import type { CharacterPersona } from "@/lib/touhouPersona/types";
+import { CHARACTERS } from "../data/characters";
+import { OVERRIDES } from "./touhouPersona/characters";
+import type { CharacterPersona } from "./touhouPersona/types";
 
 export type GenParams = {
   temperature?: number;
