@@ -1,6 +1,7 @@
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+import { createHash } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import "server-only";
 
@@ -124,49 +125,11 @@ function sanitizeReplyByContext(params: {
     }
   }
 
-  // 3) Reimu: “賽銭” jokes are fine, but throttle when they become repetitive or turn into coercion.
+  // 3) Reimu: keep light jokes, but remove harsh coercion around “賽銭”.
   if (params.chatMode === "roleplay" && params.characterId === "reimu") {
     const saisenWord = "(?:賽銭箱|お賽銭|賽銭|寄付)";
-    const saisenRe = new RegExp(saisenWord);
-    const userMentionsSaisen = saisenRe.test(lowerRecentUser);
-
-    // (A) Cooldown: If user didn't bring it up and it was used recently, drop saisen sentences to avoid spam.
-    if (!userMentionsSaisen && saisenRe.test(out)) {
-      const recentAssistantText = params.history
-        .filter((m) => m.role === "assistant")
-        .slice(-3)
-        .map((m) => String(m.content ?? ""))
-        .join("\n");
-
-      if (saisenRe.test(recentAssistantText)) {
-        const before = out;
-        out = out.replace(
-          new RegExp(`[^。！？\\n]*${saisenWord}[^。！？\\n]*[。！？]?`, "g"),
-          "",
-        );
-        out = out.replace(/\n{3,}/g, "\n\n").trim();
-        if (!out) out = before;
-      }
-    }
-
-    // (B) Cap: if user didn't bring it up, allow at most 1 saisen sentence in this reply.
-    if (!userMentionsSaisen && saisenRe.test(out)) {
-      const before = out;
-      const sentenceRe = new RegExp(`[^。！？\\n]*${saisenWord}[^。！？\\n]*[。！？]?`, "g");
-      let seen = 0;
-      out = out.replace(sentenceRe, (m) => {
-        if (seen === 0) {
-          seen++;
-          return m;
-        }
-        return "";
-      });
-      out = out.replace(/\n{3,}/g, "\n\n").trim();
-      if (!out) out = before;
-    }
-
-    // (C) Prevent harsh coercion around saisen. Keep light jokes, drop strong threats/demands.
-    {
+    const userMentionsSaisen = new RegExp(saisenWord).test(lowerRecentUser);
+    if (!userMentionsSaisen) {
       const before = out;
       out = out.replace(
         new RegExp(
@@ -183,6 +146,20 @@ function sanitizeReplyByContext(params: {
   // Collapse excessive blank lines produced by removals.
   out = out.replace(/\n{3,}/g, "\n\n").trim();
   return out ? out : String(params.reply ?? "");
+}
+
+function sha256Hex(s: string) {
+  return createHash("sha256").update(String(s ?? ""), "utf8").digest("hex");
+}
+
+function mergeMeta(
+  base: unknown,
+  extra: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = isRecord(base) ? { ...(base as Record<string, unknown>) } : {};
+  const cur = isRecord(out.touhou_ui) ? (out.touhou_ui as Record<string, unknown>) : {};
+  out.touhou_ui = { ...cur, ...extra };
+  return out;
 }
 
 async function loadCoreHistory(params: {
@@ -871,9 +848,39 @@ export async function POST(
   const chatMode: TouhouChatMode =
     chatModeRaw === "roleplay" || chatModeRaw === "coach" ? chatModeRaw : "partner";
 
-  const personaSystem = buildTouhouPersonaSystem(characterId, { chatMode });
+  const isSeedTurn = isFirstAssistantTurn(coreHistory);
+  const personaSystemBase = buildTouhouPersonaSystem(characterId, {
+    chatMode,
+    includeExamples: isSeedTurn,
+    includeRoleplayExamples: isSeedTurn,
+  });
+
+  // Turn-scoped tuning: prefer "tell the model" over "delete later".
+  const lowerRecentUser = buildRecentUserText({ history: coreHistory, currentUserText: text });
+  const saisenRe = /(?:賽銭箱|お賽銭|賽銭|寄付)/i;
+  const userMentionsSaisen = saisenRe.test(lowerRecentUser);
+  const assistantRecentText = coreHistory
+    .filter((m) => m.role === "assistant")
+    .slice(-3)
+    .map((m) => String(m.content ?? ""))
+    .join("\n");
+  const assistantRecentlyMentionedSaisen = saisenRe.test(assistantRecentText);
+
+  const turnTuningLines: string[] = [];
+  if (chatMode === "roleplay" && characterId === "reimu" && !userMentionsSaisen) {
+    if (assistantRecentlyMentionedSaisen) {
+      turnTuningLines.push("- このターンは賽銭/寄付ネタを出さない（クールダウン）。");
+    } else {
+      turnTuningLines.push("- 賽銭/寄付ネタは最大1文まで（連発しない）。");
+    }
+  }
+  const personaSystem =
+    turnTuningLines.length > 0
+      ? `${personaSystemBase}\n\n# Turn constraints\n${turnTuningLines.join("\n")}`
+      : personaSystemBase;
   const retrievalHint = retrievalSystemHint({ linkAnalyses: phase04Links });
   const personaSystemWithRetrieval = retrievalHint ? `${personaSystem}\n\n# Retrieval\n${retrievalHint}` : personaSystem;
+  const personaSystemSha256 = sha256Hex(personaSystemWithRetrieval);
   const gen = genParamsFor(characterId);
   const streamMode = wantsStream(req);
 
@@ -917,6 +924,13 @@ export async function POST(
       currentUserText: text,
     });
 
+    const mergedMeta = mergeMeta(data.meta ?? null, {
+      persona_system_sha256: personaSystemSha256,
+      chat_mode: chatMode,
+      character_id: characterId,
+      seed_turn: isSeedTurn,
+    });
+
     const { error: aiInsertError } = await supabase
       .from("common_messages")
       .insert({
@@ -926,7 +940,7 @@ export async function POST(
         role: "ai",
         content: replyGuarded,
         speaker_id: characterId,
-        meta: data.meta ?? null,
+        meta: mergedMeta,
       });
 
     if (aiInsertError) {
@@ -937,13 +951,13 @@ export async function POST(
       );
     }
 
-    if (isRecord(data.meta)) {
+    if (isRecord(mergedMeta)) {
       try {
         await supabase.from("common_state_snapshots").insert([
           toStateSnapshotRow({
             userId,
             sessionId,
-            meta: data.meta as Record<string, unknown>,
+            meta: mergedMeta as Record<string, unknown>,
           }),
         ]);
       } catch (e) {
@@ -954,7 +968,7 @@ export async function POST(
     return NextResponse.json({
       role: "ai",
       content: replyGuarded,
-      meta: data.meta ?? null,
+      meta: mergedMeta,
     });
   }
 
@@ -992,8 +1006,15 @@ export async function POST(
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
 
+  const touhouUiMeta = {
+    chat_mode: chatMode,
+    character_id: characterId,
+    persona_system_sha256: personaSystemSha256,
+    seed_turn: isSeedTurn,
+  };
+
   let replyAcc = "";
-  let finalMeta: Record<string, unknown> | null = null;
+  let finalMeta: Record<string, unknown> = mergeMeta(null, touhouUiMeta);
 
   (async () => {
     let buf = "";
@@ -1039,7 +1060,9 @@ export async function POST(
                     : replyAcc;
 
                 finalMeta =
-                  isRecord(parsed) && isRecord(parsed.meta) ? parsed.meta : null;
+                  isRecord(parsed) && isRecord(parsed.meta)
+                    ? mergeMeta(parsed.meta, touhouUiMeta)
+                    : mergeMeta(null, touhouUiMeta);
                 const replyGuarded = sanitizeReplyByContext({
                   characterId,
                   chatMode,
@@ -1068,7 +1091,7 @@ export async function POST(
         const replySafe =
           typeof replyAcc === "string" && replyAcc.trim().length > 0
             ? replyAcc
-            : "（応答生成が一時的に利用できません。）";
+            : "すみません、うまく返事を作れませんでした。もう一度送ってください。";
 
         const replyGuarded = sanitizeReplyByContext({
           characterId,
@@ -1085,20 +1108,18 @@ export async function POST(
           role: "ai",
           content: replyGuarded,
           speaker_id: characterId,
-          meta: finalMeta ?? null,
+          meta: finalMeta,
         });
       } catch (e) {
         console.warn("[touhou] persist ai message failed:", e);
       }
 
-      if (finalMeta) {
-        try {
-          await supabase.from("common_state_snapshots").insert([
-            toStateSnapshotRow({ userId, sessionId, meta: finalMeta }),
-          ]);
-        } catch (e) {
-          console.warn("[touhou] state snapshot insert failed:", e);
-        }
+      try {
+        await supabase.from("common_state_snapshots").insert([
+          toStateSnapshotRow({ userId, sessionId, meta: finalMeta }),
+        ]);
+      } catch (e) {
+        console.warn("[touhou] state snapshot insert failed:", e);
       }
 
       try {
