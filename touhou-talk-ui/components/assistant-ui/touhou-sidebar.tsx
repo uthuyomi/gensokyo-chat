@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Home, Users, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Home, Upload, Users, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -29,6 +29,10 @@ type Props = React.ComponentProps<typeof Sidebar> & {
   visibleCharacters: Character[];
   activeCharacterId: string | null;
   onSelectCharacter: (id: string) => void;
+  activeSessionId: string | null;
+  onImportArtifactFile: (file: File) => void | Promise<void>;
+  onExportActiveSession: () => void;
+  artifactBusy?: boolean;
   charactersCollapsed: boolean;
   onCharactersCollapsedChange: (next: boolean) => void;
 };
@@ -37,17 +41,25 @@ export function TouhouSidebar({
   visibleCharacters,
   activeCharacterId,
   onSelectCharacter,
+  activeSessionId,
+  onImportArtifactFile,
+  onExportActiveSession,
+  artifactBusy,
   charactersCollapsed,
   onCharactersCollapsedChange,
   className,
   ...props
 }: Props) {
   const { setOpen, setOpenMobile, isMobile } = useSidebar();
+  const fileRef = React.useRef<HTMLInputElement | null>(null);
 
   const handleClose = () => {
     if (isMobile) setOpenMobile(false);
     else setOpen(false);
   };
+
+  const canImport = !!activeCharacterId && !artifactBusy;
+  const canExport = !!activeSessionId && !artifactBusy;
 
   return (
     <Sidebar className={cn(className)} {...props}>
@@ -177,8 +189,57 @@ export function TouhouSidebar({
 
           {/* Threads (right) */}
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="border-b border-sidebar-border px-3 py-2 text-xs text-sidebar-foreground/60">
-              セッション
+            <div className="border-b border-sidebar-border px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs text-sidebar-foreground/60">セッション</div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".jsonl,.json,application/json,text/plain"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.currentTarget.files?.[0] ?? null;
+                      e.currentTarget.value = "";
+                      if (!f) return;
+                      void onImportArtifactFile(f);
+                    }}
+                  />
+
+                  <button
+                    type="button"
+                    disabled={!canImport}
+                    onClick={() => fileRef.current?.click()}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md border border-sidebar-border bg-sidebar-accent/40 px-2 py-1 text-[11px] font-medium text-sidebar-foreground/90 transition hover:bg-sidebar-accent",
+                      !canImport && "cursor-not-allowed opacity-60",
+                    )}
+                    title={
+                      activeCharacterId
+                        ? "run.jsonl / JSON を復元"
+                        : "先にキャラを選択してください"
+                    }
+                  >
+                    <Upload className="size-3.5" />
+                    インポート
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!canExport}
+                    onClick={onExportActiveSession}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-md border border-sidebar-border bg-sidebar-accent/40 px-2 py-1 text-[11px] font-medium text-sidebar-foreground/90 transition hover:bg-sidebar-accent",
+                      !canExport && "cursor-not-allowed opacity-60",
+                    )}
+                    title={activeSessionId ? "現在のセッションをJSONLで出力" : "セッション未選択"}
+                  >
+                    <Download className="size-3.5" />
+                    エクスポート
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
               <ThreadList />
