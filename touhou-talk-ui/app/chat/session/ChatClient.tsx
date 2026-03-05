@@ -33,6 +33,7 @@ import { Separator } from "@/components/ui/separator";
  import { CHARACTERS, isCharacterSelectable } from "@/data/characters";
 import { getGroupsByLocation, canEnableGroup, GroupDef } from "@/data/group";
 import { getDefaultChatMode } from "@/lib/touhou-settings";
+import { buildRunJsonlFromMessages, parseArtifactText } from "@/lib/artifact/artifact-io";
 
 import {
   extractTextFromThreadMessageContent,
@@ -146,6 +147,8 @@ export default function ChatClient() {
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(
     null,
   );
+
+  const [artifactBusy, setArtifactBusy] = useState(false);
 
   const [messagesBySession, setMessagesBySession] = useState<
     Record<string, Message[]>
@@ -395,6 +398,159 @@ export default function ChatClient() {
     setMessagesBySession((prev) => ({ ...prev, [newSession.id]: [] }));
     setHasSelectedOnce(true);
   }, [activeCharacterId, mode, currentLayer, currentLocationId]);
+
+  /* =========================
+     Artifact import / export
+  ========================= */
+
+  const handleExportActiveSession = useCallback(() => {
+    if (!activeSessionId) return;
+
+    const list = messagesBySession[activeSessionId] ?? [];
+    const jsonl = buildRunJsonlFromMessages({
+      sessionId: activeSessionId,
+      messages: list.map((m) => ({ role: m.role, content: m.content })),
+    });
+
+    if (!jsonl.trim()) {
+      alert("エクスポートできるメッセージがありません。");
+      return;
+    }
+
+    const blob = new Blob([jsonl], { type: "application/x-ndjson" });
+    const dlUrl = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement("a");
+      a.href = dlUrl;
+      a.download = "run.jsonl";
+      a.click();
+    } finally {
+      URL.revokeObjectURL(dlUrl);
+    }
+  }, [activeSessionId, messagesBySession]);
+
+  const handleImportArtifactFile = useCallback(
+    async (file: File) => {
+      if (!activeCharacterId) {
+        alert("先にキャラを選択してください。");
+        return;
+      }
+
+      const MAX_BYTES = 10 * 1024 * 1024; // 10MB
+      if (file.size > MAX_BYTES) {
+        alert("ファイルが大きすぎます（最大10MB）。");
+        return;
+      }
+
+      setArtifactBusy(true);
+      try {
+        const text = await file.text();
+        const parsed = parseArtifactText(text);
+
+        if (!parsed.sessions || parsed.sessions.length === 0) {
+          alert("復元できるデータが見つかりませんでした。");
+          return;
+        }
+
+        const importChatMode = getDefaultChatMode();
+        const payloadSessions = parsed.sessions.map((s) => ({
+          title: s.title,
+          externalSessionId: s.externalSessionId,
+          messages: s.messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+            meta: m.meta ?? null,
+          })),
+        }));
+
+        const res = await fetch("/api/session/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            characterId: activeCharacterId,
+            mode,
+            layer: currentLayer,
+            location: currentLocationId,
+            chatMode: importChatMode,
+            sessions: payloadSessions,
+          }),
+        });
+
+        if (!res.ok) {
+          const detail = await res.text().catch(() => "");
+          throw new Error(`HTTP ${res.status} ${detail}`);
+        }
+
+        const data = (await res.json()) as {
+          sessions?: Array<{
+            sessionId: string;
+            title: string;
+            externalSessionId?: string;
+          }>;
+        };
+
+        const created = Array.isArray(data.sessions) ? data.sessions : [];
+        if (created.length === 0) {
+          alert("復元に失敗しました（有効なセッションがありません）。");
+          return;
+        }
+
+        const externalToSource = new Map<string, (typeof parsed.sessions)[number]>();
+        for (const s of parsed.sessions) {
+          if (typeof s.externalSessionId === "string" && s.externalSessionId) {
+            externalToSource.set(s.externalSessionId, s);
+          }
+        }
+
+        const newSessions: SessionSummary[] = created.map((s) => ({
+          id: s.sessionId,
+          title: s.title,
+          characterId: activeCharacterId,
+          mode,
+          layer: currentLayer,
+          location: currentLocationId,
+          chatMode: importChatMode,
+        }));
+
+        setSessions((prev) => [...newSessions, ...prev]);
+
+        setMessagesBySession((prev) => {
+          const next = { ...prev };
+          for (let i = 0; i < created.length; i++) {
+            const createdSession = created[i];
+            const source =
+              (createdSession.externalSessionId
+                ? externalToSource.get(createdSession.externalSessionId)
+                : null) ??
+              parsed.sessions[i] ??
+              null;
+
+            const msgs = (source?.messages ?? []).map((m) => ({
+              id: crypto.randomUUID(),
+              role: m.role,
+              content: m.content,
+              speakerId: m.role === "ai" ? activeCharacterId : undefined,
+              attachments: [],
+              meta: m.meta ?? null,
+            })) satisfies Message[];
+
+            next[createdSession.sessionId] = msgs;
+          }
+          return next;
+        });
+
+        setActiveSessionId(created[0].sessionId);
+        setHasSelectedOnce(true);
+        setSidebarCloseRequestId((v) => v + 1);
+      } catch (e: any) {
+        const msg = typeof e?.message === "string" ? e.message : String(e);
+        alert("インポートに失敗しました。\n" + msg);
+      } finally {
+        setArtifactBusy(false);
+      }
+    },
+    [activeCharacterId, currentLayer, currentLocationId, mode],
+  );
 
   /* =========================
    Reset auto select flag when URL char changes
@@ -973,6 +1129,10 @@ export default function ChatClient() {
               visibleCharacters={visibleCharacters}
               activeCharacterId={activeCharacterId}
               onSelectCharacter={selectCharacter}
+              activeSessionId={activeSessionId}
+              onImportArtifactFile={handleImportArtifactFile}
+              onExportActiveSession={handleExportActiveSession}
+              artifactBusy={artifactBusy}
               charactersCollapsed={charactersCollapsed}
               onCharactersCollapsedChange={setCharactersCollapsed}
             />
