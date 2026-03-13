@@ -1,0 +1,12 @@
+{
+  "id": "village_rumor",
+  "location_id": "human_village",
+  "probability": 0.3,
+  "cooldown_hours": 8,
+  "constraints": {},
+  "participants": { "required": [], "optional": [] },
+  "log_type": "system",
+  "effects": { "state": [], "world": [] },
+  "payload": { "summary": "里で妙な噂が流れている。" }
+}
+

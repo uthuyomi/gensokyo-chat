@@ -1,0 +1,6 @@
+{
+  "relationships": [
+    { "character_a": "reimu", "character_b": "marisa", "trust": 0.75, "caution": 0.25, "familiarity": 0.9 }
+  ]
+}
+

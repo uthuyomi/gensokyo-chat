@@ -1,0 +1,17 @@
+{
+  "id": "reimu_cleaning",
+  "location_id": "hakurei_shrine",
+  "probability": 0.35,
+  "cooldown_hours": 6,
+  "constraints": { "time_of_day": ["morning", "day", "evening"] },
+  "participants": { "required": ["reimu"], "optional": [] },
+  "log_type": "npc_action",
+  "effects": {
+    "state": [
+      { "target": "reimu", "set": { "location_id": "hakurei_shrine", "action": "cleaning", "emotion": "neutral" } }
+    ],
+    "world": []
+  },
+  "payload": { "summary": "霊夢が境内を掃除している。" }
+}
+

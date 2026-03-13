@@ -1,0 +1,2216 @@
+{
+  "id": "reimu",
+  "scannedAt": "2026-03-06T14:51:13.862Z",
+  "gltf": {
+    "nodeCount": 289,
+    "nodes": [
+      {
+        "index": 0,
+        "name": "おさげ3.R",
+        "children": []
+      },
+      {
+        "index": 1,
+        "name": "おさげ2.R",
+        "children": [
+          0
+        ]
+      },
+      {
+        "index": 2,
+        "name": "おさげ1.R",
+        "children": [
+          1
+        ]
+      },
+      {
+        "index": 3,
+        "name": "おさげ0.R",
+        "children": [
+          2
+        ]
+      },
+      {
+        "index": 4,
+        "name": "前髪中",
+        "children": []
+      },
+      {
+        "index": 5,
+        "name": "テール3",
+        "children": []
+      },
+      {
+        "index": 6,
+        "name": "テール2",
+        "children": [
+          5
+        ]
+      },
+      {
+        "index": 7,
+        "name": "テール1",
+        "children": [
+          6
+        ]
+      },
+      {
+        "index": 8,
+        "name": "後髪中",
+        "children": []
+      },
+      {
+        "index": 9,
+        "name": "後髪1.R",
+        "children": []
+      },
+      {
+        "index": 10,
+        "name": "後髪2.R",
+        "children": []
+      },
+      {
+        "index": 11,
+        "name": "前髪先.L",
+        "children": []
+      },
+      {
+        "index": 12,
+        "name": "前髪.L",
+        "children": [
+          11
+        ]
+      },
+      {
+        "index": 13,
+        "name": "前髪2先.L",
+        "children": []
+      },
+      {
+        "index": 14,
+        "name": "前髪2.L",
+        "children": [
+          13
+        ]
+      },
+      {
+        "index": 15,
+        "name": "まゆ.R",
+        "children": []
+      },
+      {
+        "index": 16,
+        "name": "まゆ.L",
+        "children": []
+      },
+      {
+        "index": 17,
+        "name": "上歯",
+        "children": []
+      },
+      {
+        "index": 18,
+        "name": "下歯",
+        "children": []
+      },
+      {
+        "index": 19,
+        "name": "舌1",
+        "children": []
+      },
+      {
+        "index": 20,
+        "name": "影",
+        "children": []
+      },
+      {
+        "index": 21,
+        "name": "両目",
+        "children": []
+      },
+      {
+        "index": 22,
+        "name": "目.L",
+        "children": []
+      },
+      {
+        "index": 23,
+        "name": "目.R",
+        "children": []
+      },
+      {
+        "index": 24,
+        "name": "リボン下先.R",
+        "children": []
+      },
+      {
+        "index": 25,
+        "name": "リボン下3.R",
+        "children": [
+          24
+        ]
+      },
+      {
+        "index": 26,
+        "name": "リボン下2.R",
+        "children": [
+          25
+        ]
+      },
+      {
+        "index": 27,
+        "name": "リボン下1.R",
+        "children": [
+          26
+        ]
+      },
+      {
+        "index": 28,
+        "name": "リボン2.R",
+        "children": []
+      },
+      {
+        "index": 29,
+        "name": "リボン1.R",
+        "children": [
+          28
+        ]
+      },
+      {
+        "index": 30,
+        "name": "リボン下先.L",
+        "children": []
+      },
+      {
+        "index": 31,
+        "name": "リボン下3.L",
+        "children": [
+          30
+        ]
+      },
+      {
+        "index": 32,
+        "name": "リボン下2.L",
+        "children": [
+          31
+        ]
+      },
+      {
+        "index": 33,
+        "name": "リボン下1.L",
+        "children": [
+          32
+        ]
+      },
+      {
+        "index": 34,
+        "name": "リボン2.L",
+        "children": []
+      },
+      {
+        "index": 35,
+        "name": "リボン1.L",
+        "children": [
+          34
+        ]
+      },
+      {
+        "index": 36,
+        "name": "後髪1.L",
+        "children": []
+      },
+      {
+        "index": 37,
+        "name": "後髪2.L",
+        "children": []
+      },
+      {
+        "index": 38,
+        "name": "涙.L",
+        "children": []
+      },
+      {
+        "index": 39,
+        "name": "涙.R",
+        "children": []
+      },
+      {
+        "index": 40,
+        "name": "前髪2先.R",
+        "children": []
+      },
+      {
+        "index": 41,
+        "name": "前髪2.R",
+        "children": [
+          40
+        ]
+      },
+      {
+        "index": 42,
+        "name": "おさげ2.L",
+        "children": []
+      },
+      {
+        "index": 43,
+        "name": "おさげ1.L",
+        "children": [
+          42
+        ]
+      },
+      {
+        "index": 44,
+        "name": "おさげ0.L",
+        "children": [
+          43
+        ]
+      },
+      {
+        "index": 45,
+        "name": "頭",
+        "children": [
+          3,
+          4,
+          7,
+          8,
+          9,
+          10,
+          12,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          27,
+          29,
+          33,
+          35,
+          36,
+          37,
+          38,
+          39,
+          41,
+          44
+        ]
+      },
+      {
+        "index": 46,
+        "name": "首",
+        "children": [
+          45
+        ]
+      },
+      {
+        "index": 47,
+        "name": "ネクタイ1",
+        "children": []
+      },
+      {
+        "index": 48,
+        "name": "ネクタイ",
+        "children": [
+          47
+        ]
+      },
+      {
+        "index": 49,
+        "name": "手首IK.R",
+        "children": []
+      },
+      {
+        "index": 50,
+        "name": "親指先.R",
+        "children": []
+      },
+      {
+        "index": 51,
+        "name": "親指２.R",
+        "children": [
+          50
+        ]
+      },
+      {
+        "index": 52,
+        "name": "親指１.R",
+        "children": [
+          51
+        ]
+      },
+      {
+        "index": 53,
+        "name": "親指０.R",
+        "children": [
+          52
+        ]
+      },
+      {
+        "index": 54,
+        "name": "人差指先.R",
+        "children": []
+      },
+      {
+        "index": 55,
+        "name": "人指３.R",
+        "children": [
+          54
+        ]
+      },
+      {
+        "index": 56,
+        "name": "人指２.R",
+        "children": [
+          55
+        ]
+      },
+      {
+        "index": 57,
+        "name": "人指１.R",
+        "children": [
+          56
+        ]
+      },
+      {
+        "index": 58,
+        "name": "中指先.R",
+        "children": []
+      },
+      {
+        "index": 59,
+        "name": "中指３.R",
+        "children": [
+          58
+        ]
+      },
+      {
+        "index": 60,
+        "name": "中指２.R",
+        "children": [
+          59
+        ]
+      },
+      {
+        "index": 61,
+        "name": "中指１.R",
+        "children": [
+          60
+        ]
+      },
+      {
+        "index": 62,
+        "name": "薬指先.R",
+        "children": []
+      },
+      {
+        "index": 63,
+        "name": "薬指３.R",
+        "children": [
+          62
+        ]
+      },
+      {
+        "index": 64,
+        "name": "薬指２.R",
+        "children": [
+          63
+        ]
+      },
+      {
+        "index": 65,
+        "name": "薬指１.R",
+        "children": [
+          64
+        ]
+      },
+      {
+        "index": 66,
+        "name": "小指先.R",
+        "children": []
+      },
+      {
+        "index": 67,
+        "name": "小指３.R",
+        "children": [
+          66
+        ]
+      },
+      {
+        "index": 68,
+        "name": "小指２.R",
+        "children": [
+          67
+        ]
+      },
+      {
+        "index": 69,
+        "name": "小指１.R",
+        "children": [
+          68
+        ]
+      },
+      {
+        "index": 70,
+        "name": "手持.R",
+        "children": []
+      },
+      {
+        "index": 71,
+        "name": "手首.R",
+        "children": [
+          49,
+          53,
+          57,
+          61,
+          65,
+          69,
+          70
+        ]
+      },
+      {
+        "index": 72,
+        "name": "手首補助.R",
+        "children": []
+      },
+      {
+        "index": 73,
+        "name": "手捩.R",
+        "children": [
+          71,
+          72
+        ]
+      },
+      {
+        "index": 74,
+        "name": "手捩1.R",
+        "children": []
+      },
+      {
+        "index": 75,
+        "name": "手捩2.R",
+        "children": []
+      },
+      {
+        "index": 76,
+        "name": "手首先.R",
+        "children": []
+      },
+      {
+        "index": 77,
+        "name": "手捩3.R",
+        "children": [
+          76
+        ]
+      },
+      {
+        "index": 78,
+        "name": "ひじ.R",
+        "children": [
+          73,
+          74,
+          75,
+          77
+        ]
+      },
+      {
+        "index": 79,
+        "name": "ひじ補助.R",
+        "children": []
+      },
+      {
+        "index": 80,
+        "name": "肘IK.R",
+        "children": []
+      },
+      {
+        "index": 81,
+        "name": "腕捩.R",
+        "children": [
+          78,
+          79,
+          80
+        ]
+      },
+      {
+        "index": 82,
+        "name": "腕捩1.R",
+        "children": []
+      },
+      {
+        "index": 83,
+        "name": "腕捩2.R",
+        "children": []
+      },
+      {
+        "index": 84,
+        "name": "腕捩3.R",
+        "children": []
+      },
+      {
+        "index": 85,
+        "name": "腕.R",
+        "children": [
+          81,
+          82,
+          83,
+          84
+        ]
+      },
+      {
+        "index": 86,
+        "name": "腕IK.R",
+        "children": []
+      },
+      {
+        "index": 87,
+        "name": "肩C.R",
+        "children": [
+          85,
+          86
+        ]
+      },
+      {
+        "index": 88,
+        "name": "肩.R",
+        "children": [
+          87
+        ]
+      },
+      {
+        "index": 89,
+        "name": "肘袖先.R",
+        "children": []
+      },
+      {
+        "index": 90,
+        "name": "肘袖1-3.R",
+        "children": []
+      },
+      {
+        "index": 91,
+        "name": "肘袖1-2.R",
+        "children": [
+          90
+        ]
+      },
+      {
+        "index": 92,
+        "name": "肘袖1-1.R",
+        "children": [
+          91
+        ]
+      },
+      {
+        "index": 93,
+        "name": "肘袖1-0.R",
+        "children": [
+          92
+        ]
+      },
+      {
+        "index": 94,
+        "name": "肘袖2-3.R",
+        "children": []
+      },
+      {
+        "index": 95,
+        "name": "肘袖2-6.R",
+        "children": []
+      },
+      {
+        "index": 96,
+        "name": "肘袖2-5.R",
+        "children": [
+          95
+        ]
+      },
+      {
+        "index": 97,
+        "name": "肘袖2-4.R",
+        "children": [
+          96
+        ]
+      },
+      {
+        "index": 98,
+        "name": "肘袖2-2.R",
+        "children": [
+          94,
+          97
+        ]
+      },
+      {
+        "index": 99,
+        "name": "肘袖2-1.R",
+        "children": [
+          98
+        ]
+      },
+      {
+        "index": 100,
+        "name": "肘袖2-0.R",
+        "children": [
+          99
+        ]
+      },
+      {
+        "index": 101,
+        "name": "肘袖.R",
+        "children": [
+          89,
+          93,
+          100
+        ]
+      },
+      {
+        "index": 102,
+        "name": "腕袖先.R",
+        "children": [
+          101
+        ]
+      },
+      {
+        "index": 103,
+        "name": "腕袖リボン後.R",
+        "children": []
+      },
+      {
+        "index": 104,
+        "name": "腕袖リボン前.R",
+        "children": []
+      },
+      {
+        "index": 105,
+        "name": "腕袖.R",
+        "children": [
+          102,
+          103,
+          104
+        ]
+      },
+      {
+        "index": 106,
+        "name": "肩襟先.R",
+        "children": [
+          105
+        ]
+      },
+      {
+        "index": 107,
+        "name": "肩襟.R",
+        "children": [
+          106
+        ]
+      },
+      {
+        "index": 108,
+        "name": "肩P.R",
+        "children": [
+          88,
+          107
+        ]
+      },
+      {
+        "index": 109,
+        "name": "胸先.R",
+        "children": []
+      },
+      {
+        "index": 110,
+        "name": "胸.R",
+        "children": [
+          109
+        ]
+      },
+      {
+        "index": 111,
+        "name": "手首IK.L",
+        "children": []
+      },
+      {
+        "index": 112,
+        "name": "親指先.L",
+        "children": []
+      },
+      {
+        "index": 113,
+        "name": "親指２.L",
+        "children": [
+          112
+        ]
+      },
+      {
+        "index": 114,
+        "name": "親指１.L",
+        "children": [
+          113
+        ]
+      },
+      {
+        "index": 115,
+        "name": "親指０.L",
+        "children": [
+          114
+        ]
+      },
+      {
+        "index": 116,
+        "name": "人差指先.L",
+        "children": []
+      },
+      {
+        "index": 117,
+        "name": "人指３.L",
+        "children": [
+          116
+        ]
+      },
+      {
+        "index": 118,
+        "name": "人指２.L",
+        "children": [
+          117
+        ]
+      },
+      {
+        "index": 119,
+        "name": "人指１.L",
+        "children": [
+          118
+        ]
+      },
+      {
+        "index": 120,
+        "name": "中指先.L",
+        "children": []
+      },
+      {
+        "index": 121,
+        "name": "中指３.L",
+        "children": [
+          120
+        ]
+      },
+      {
+        "index": 122,
+        "name": "中指２.L",
+        "children": [
+          121
+        ]
+      },
+      {
+        "index": 123,
+        "name": "中指１.L",
+        "children": [
+          122
+        ]
+      },
+      {
+        "index": 124,
+        "name": "薬指先.L",
+        "children": []
+      },
+      {
+        "index": 125,
+        "name": "薬指３.L",
+        "children": [
+          124
+        ]
+      },
+      {
+        "index": 126,
+        "name": "薬指２.L",
+        "children": [
+          125
+        ]
+      },
+      {
+        "index": 127,
+        "name": "薬指１.L",
+        "children": [
+          126
+        ]
+      },
+      {
+        "index": 128,
+        "name": "小指先.L",
+        "children": []
+      },
+      {
+        "index": 129,
+        "name": "小指３.L",
+        "children": [
+          128
+        ]
+      },
+      {
+        "index": 130,
+        "name": "小指２.L",
+        "children": [
+          129
+        ]
+      },
+      {
+        "index": 131,
+        "name": "小指１.L",
+        "children": [
+          130
+        ]
+      },
+      {
+        "index": 132,
+        "name": "手持.L",
+        "children": []
+      },
+      {
+        "index": 133,
+        "name": "手首.L",
+        "children": [
+          111,
+          115,
+          119,
+          123,
+          127,
+          131,
+          132
+        ]
+      },
+      {
+        "index": 134,
+        "name": "手首補助.L",
+        "children": []
+      },
+      {
+        "index": 135,
+        "name": "手捩.L",
+        "children": [
+          133,
+          134
+        ]
+      },
+      {
+        "index": 136,
+        "name": "手捩1.L",
+        "children": []
+      },
+      {
+        "index": 137,
+        "name": "手捩2.L",
+        "children": []
+      },
+      {
+        "index": 138,
+        "name": "手首先.L",
+        "children": []
+      },
+      {
+        "index": 139,
+        "name": "手捩3.L",
+        "children": [
+          138
+        ]
+      },
+      {
+        "index": 140,
+        "name": "ひじ.L",
+        "children": [
+          135,
+          136,
+          137,
+          139
+        ]
+      },
+      {
+        "index": 141,
+        "name": "ひじ補助.L",
+        "children": []
+      },
+      {
+        "index": 142,
+        "name": "肘IK.L",
+        "children": []
+      },
+      {
+        "index": 143,
+        "name": "腕捩.L",
+        "children": [
+          140,
+          141,
+          142
+        ]
+      },
+      {
+        "index": 144,
+        "name": "腕捩1.L",
+        "children": []
+      },
+      {
+        "index": 145,
+        "name": "腕捩2.L",
+        "children": []
+      },
+      {
+        "index": 146,
+        "name": "腕捩3.L",
+        "children": []
+      },
+      {
+        "index": 147,
+        "name": "腕.L",
+        "children": [
+          143,
+          144,
+          145,
+          146
+        ]
+      },
+      {
+        "index": 148,
+        "name": "腕IK.L",
+        "children": []
+      },
+      {
+        "index": 149,
+        "name": "肩C.L",
+        "children": [
+          147,
+          148
+        ]
+      },
+      {
+        "index": 150,
+        "name": "肩.L",
+        "children": [
+          149
+        ]
+      },
+      {
+        "index": 151,
+        "name": "肘袖先.L",
+        "children": []
+      },
+      {
+        "index": 152,
+        "name": "肘袖1-3.L",
+        "children": []
+      },
+      {
+        "index": 153,
+        "name": "肘袖1-2.L",
+        "children": [
+          152
+        ]
+      },
+      {
+        "index": 154,
+        "name": "肘袖1-1.L",
+        "children": [
+          153
+        ]
+      },
+      {
+        "index": 155,
+        "name": "肘袖1-0.L",
+        "children": [
+          154
+        ]
+      },
+      {
+        "index": 156,
+        "name": "肘袖2-3.L",
+        "children": []
+      },
+      {
+        "index": 157,
+        "name": "肘袖2-6.L",
+        "children": []
+      },
+      {
+        "index": 158,
+        "name": "肘袖2-5.L",
+        "children": [
+          157
+        ]
+      },
+      {
+        "index": 159,
+        "name": "肘袖2-4.L",
+        "children": [
+          158
+        ]
+      },
+      {
+        "index": 160,
+        "name": "肘袖2-2.L",
+        "children": [
+          156,
+          159
+        ]
+      },
+      {
+        "index": 161,
+        "name": "肘袖2-1.L",
+        "children": [
+          160
+        ]
+      },
+      {
+        "index": 162,
+        "name": "肘袖2-0.L",
+        "children": [
+          161
+        ]
+      },
+      {
+        "index": 163,
+        "name": "肘袖.L",
+        "children": [
+          151,
+          155,
+          162
+        ]
+      },
+      {
+        "index": 164,
+        "name": "腕袖先.L",
+        "children": [
+          163
+        ]
+      },
+      {
+        "index": 165,
+        "name": "腕袖リボン後.L",
+        "children": []
+      },
+      {
+        "index": 166,
+        "name": "腕袖リボン前.L",
+        "children": []
+      },
+      {
+        "index": 167,
+        "name": "腕袖.L",
+        "children": [
+          164,
+          165,
+          166
+        ]
+      },
+      {
+        "index": 168,
+        "name": "肩襟先.L",
+        "children": [
+          167
+        ]
+      },
+      {
+        "index": 169,
+        "name": "肩襟.L",
+        "children": [
+          168
+        ]
+      },
+      {
+        "index": 170,
+        "name": "肩P.L",
+        "children": [
+          150,
+          169
+        ]
+      },
+      {
+        "index": 171,
+        "name": "胸先.L",
+        "children": []
+      },
+      {
+        "index": 172,
+        "name": "胸.L",
+        "children": [
+          171
+        ]
+      },
+      {
+        "index": 173,
+        "name": "上半身2",
+        "children": [
+          46,
+          48,
+          108,
+          110,
+          170,
+          172
+        ]
+      },
+      {
+        "index": 174,
+        "name": "裾_1_0",
+        "children": []
+      },
+      {
+        "index": 175,
+        "name": "裾_0_0",
+        "children": [
+          174
+        ]
+      },
+      {
+        "index": 176,
+        "name": "裾_1_1",
+        "children": []
+      },
+      {
+        "index": 177,
+        "name": "裾_0_1",
+        "children": [
+          176
+        ]
+      },
+      {
+        "index": 178,
+        "name": "裾_1_2",
+        "children": []
+      },
+      {
+        "index": 179,
+        "name": "裾_0_2",
+        "children": [
+          178
+        ]
+      },
+      {
+        "index": 180,
+        "name": "裾_1_3",
+        "children": []
+      },
+      {
+        "index": 181,
+        "name": "裾_0_3",
+        "children": [
+          180
+        ]
+      },
+      {
+        "index": 182,
+        "name": "裾_1_4",
+        "children": []
+      },
+      {
+        "index": 183,
+        "name": "裾_0_4",
+        "children": [
+          182
+        ]
+      },
+      {
+        "index": 184,
+        "name": "裾_1_5",
+        "children": []
+      },
+      {
+        "index": 185,
+        "name": "裾_0_5",
+        "children": [
+          184
+        ]
+      },
+      {
+        "index": 186,
+        "name": "裾_1_6",
+        "children": []
+      },
+      {
+        "index": 187,
+        "name": "裾_0_6",
+        "children": [
+          186
+        ]
+      },
+      {
+        "index": 188,
+        "name": "裾_1_7",
+        "children": []
+      },
+      {
+        "index": 189,
+        "name": "裾_0_7",
+        "children": [
+          188
+        ]
+      },
+      {
+        "index": 190,
+        "name": "腹",
+        "children": [
+          175,
+          177,
+          179,
+          181,
+          183,
+          185,
+          187,
+          189
+        ]
+      },
+      {
+        "index": 191,
+        "name": "上半身",
+        "children": [
+          173,
+          190
+        ]
+      },
+      {
+        "index": 192,
+        "name": "スカート先",
+        "children": []
+      },
+      {
+        "index": 193,
+        "name": "上リボン3.L",
+        "children": []
+      },
+      {
+        "index": 194,
+        "name": "上リボン2.L",
+        "children": [
+          193
+        ]
+      },
+      {
+        "index": 195,
+        "name": "上リボン1.L",
+        "children": [
+          194
+        ]
+      },
+      {
+        "index": 196,
+        "name": "下リボン4.L",
+        "children": []
+      },
+      {
+        "index": 197,
+        "name": "下リボン3.L",
+        "children": [
+          196
+        ]
+      },
+      {
+        "index": 198,
+        "name": "下リボン2.L",
+        "children": [
+          197
+        ]
+      },
+      {
+        "index": 199,
+        "name": "下リボン1.L",
+        "children": [
+          198
+        ]
+      },
+      {
+        "index": 200,
+        "name": "上リボン3.R",
+        "children": []
+      },
+      {
+        "index": 201,
+        "name": "上リボン2.R",
+        "children": [
+          200
+        ]
+      },
+      {
+        "index": 202,
+        "name": "上リボン1.R",
+        "children": [
+          201
+        ]
+      },
+      {
+        "index": 203,
+        "name": "下リボン4.R",
+        "children": []
+      },
+      {
+        "index": 204,
+        "name": "下リボン3.R",
+        "children": [
+          203
+        ]
+      },
+      {
+        "index": 205,
+        "name": "下リボン2.R",
+        "children": [
+          204
+        ]
+      },
+      {
+        "index": 206,
+        "name": "下リボン1.R",
+        "children": [
+          205
+        ]
+      },
+      {
+        "index": 207,
+        "name": "腰リボン",
+        "children": [
+          195,
+          199,
+          202,
+          206
+        ]
+      },
+      {
+        "index": 208,
+        "name": "スカート_4_0",
+        "children": []
+      },
+      {
+        "index": 209,
+        "name": "スカート_3_0",
+        "children": [
+          208
+        ]
+      },
+      {
+        "index": 210,
+        "name": "スカート_2_0",
+        "children": [
+          209
+        ]
+      },
+      {
+        "index": 211,
+        "name": "スカート_1_0",
+        "children": [
+          210
+        ]
+      },
+      {
+        "index": 212,
+        "name": "スカート_0_0",
+        "children": [
+          211
+        ]
+      },
+      {
+        "index": 213,
+        "name": "スカート_4_1",
+        "children": []
+      },
+      {
+        "index": 214,
+        "name": "スカート_3_1",
+        "children": [
+          213
+        ]
+      },
+      {
+        "index": 215,
+        "name": "スカート_2_1",
+        "children": [
+          214
+        ]
+      },
+      {
+        "index": 216,
+        "name": "スカート_1_1",
+        "children": [
+          215
+        ]
+      },
+      {
+        "index": 217,
+        "name": "スカート_0_1",
+        "children": [
+          216
+        ]
+      },
+      {
+        "index": 218,
+        "name": "スカート_4_2",
+        "children": []
+      },
+      {
+        "index": 219,
+        "name": "スカート_3_2",
+        "children": [
+          218
+        ]
+      },
+      {
+        "index": 220,
+        "name": "スカート_2_2",
+        "children": [
+          219
+        ]
+      },
+      {
+        "index": 221,
+        "name": "スカート_1_2",
+        "children": [
+          220
+        ]
+      },
+      {
+        "index": 222,
+        "name": "スカート_0_2",
+        "children": [
+          221
+        ]
+      },
+      {
+        "index": 223,
+        "name": "スカート_4_3",
+        "children": []
+      },
+      {
+        "index": 224,
+        "name": "スカート_3_3",
+        "children": [
+          223
+        ]
+      },
+      {
+        "index": 225,
+        "name": "スカート_2_3",
+        "children": [
+          224
+        ]
+      },
+      {
+        "index": 226,
+        "name": "スカート_1_3",
+        "children": [
+          225
+        ]
+      },
+      {
+        "index": 227,
+        "name": "スカート_0_3",
+        "children": [
+          226
+        ]
+      },
+      {
+        "index": 228,
+        "name": "スカート_4_4",
+        "children": []
+      },
+      {
+        "index": 229,
+        "name": "スカート_3_4",
+        "children": [
+          228
+        ]
+      },
+      {
+        "index": 230,
+        "name": "スカート_2_4",
+        "children": [
+          229
+        ]
+      },
+      {
+        "index": 231,
+        "name": "スカート_1_4",
+        "children": [
+          230
+        ]
+      },
+      {
+        "index": 232,
+        "name": "スカート_0_4",
+        "children": [
+          231
+        ]
+      },
+      {
+        "index": 233,
+        "name": "スカート_4_5",
+        "children": []
+      },
+      {
+        "index": 234,
+        "name": "スカート_3_5",
+        "children": [
+          233
+        ]
+      },
+      {
+        "index": 235,
+        "name": "スカート_2_5",
+        "children": [
+          234
+        ]
+      },
+      {
+        "index": 236,
+        "name": "スカート_1_5",
+        "children": [
+          235
+        ]
+      },
+      {
+        "index": 237,
+        "name": "スカート_0_5",
+        "children": [
+          236
+        ]
+      },
+      {
+        "index": 238,
+        "name": "スカート_4_6",
+        "children": []
+      },
+      {
+        "index": 239,
+        "name": "スカート_3_6",
+        "children": [
+          238
+        ]
+      },
+      {
+        "index": 240,
+        "name": "スカート_2_6",
+        "children": [
+          239
+        ]
+      },
+      {
+        "index": 241,
+        "name": "スカート_1_6",
+        "children": [
+          240
+        ]
+      },
+      {
+        "index": 242,
+        "name": "スカート_0_6",
+        "children": [
+          241
+        ]
+      },
+      {
+        "index": 243,
+        "name": "スカート_4_7",
+        "children": []
+      },
+      {
+        "index": 244,
+        "name": "スカート_3_7",
+        "children": [
+          243
+        ]
+      },
+      {
+        "index": 245,
+        "name": "スカート_2_7",
+        "children": [
+          244
+        ]
+      },
+      {
+        "index": 246,
+        "name": "スカート_1_7",
+        "children": [
+          245
+        ]
+      },
+      {
+        "index": 247,
+        "name": "スカート_0_7",
+        "children": [
+          246
+        ]
+      },
+      {
+        "index": 248,
+        "name": "スカート_4_8",
+        "children": []
+      },
+      {
+        "index": 249,
+        "name": "スカート_3_8",
+        "children": [
+          248
+        ]
+      },
+      {
+        "index": 250,
+        "name": "スカート_2_8",
+        "children": [
+          249
+        ]
+      },
+      {
+        "index": 251,
+        "name": "スカート_1_8",
+        "children": [
+          250
+        ]
+      },
+      {
+        "index": 252,
+        "name": "スカート_0_8",
+        "children": [
+          251
+        ]
+      },
+      {
+        "index": 253,
+        "name": "スカート_4_9",
+        "children": []
+      },
+      {
+        "index": 254,
+        "name": "スカート_3_9",
+        "children": [
+          253
+        ]
+      },
+      {
+        "index": 255,
+        "name": "スカート_2_9",
+        "children": [
+          254
+        ]
+      },
+      {
+        "index": 256,
+        "name": "スカート_1_9",
+        "children": [
+          255
+        ]
+      },
+      {
+        "index": 257,
+        "name": "スカート_0_9",
+        "children": [
+          256
+        ]
+      },
+      {
+        "index": 258,
+        "name": "スカート_4_10",
+        "children": []
+      },
+      {
+        "index": 259,
+        "name": "スカート_3_10",
+        "children": [
+          258
+        ]
+      },
+      {
+        "index": 260,
+        "name": "スカート_2_10",
+        "children": [
+          259
+        ]
+      },
+      {
+        "index": 261,
+        "name": "スカート_1_10",
+        "children": [
+          260
+        ]
+      },
+      {
+        "index": 262,
+        "name": "スカート_0_10",
+        "children": [
+          261
+        ]
+      },
+      {
+        "index": 263,
+        "name": "スカート_4_11",
+        "children": []
+      },
+      {
+        "index": 264,
+        "name": "スカート_3_11",
+        "children": [
+          263
+        ]
+      },
+      {
+        "index": 265,
+        "name": "スカート_2_11",
+        "children": [
+          264
+        ]
+      },
+      {
+        "index": 266,
+        "name": "スカート_1_11",
+        "children": [
+          265
+        ]
+      },
+      {
+        "index": 267,
+        "name": "スカート_0_11",
+        "children": [
+          266
+        ]
+      },
+      {
+        "index": 268,
+        "name": "スカート",
+        "children": [
+          192,
+          207,
+          212,
+          217,
+          222,
+          227,
+          232,
+          237,
+          242,
+          247,
+          252,
+          257,
+          262,
+          267
+        ]
+      },
+      {
+        "index": 269,
+        "name": "つま先.R",
+        "children": []
+      },
+      {
+        "index": 270,
+        "name": "足先.R",
+        "children": []
+      },
+      {
+        "index": 271,
+        "name": "足首.R",
+        "children": [
+          269,
+          270
+        ]
+      },
+      {
+        "index": 272,
+        "name": "ひざ.R",
+        "children": [
+          271
+        ]
+      },
+      {
+        "index": 273,
+        "name": "足.R",
+        "children": [
+          272
+        ]
+      },
+      {
+        "index": 274,
+        "name": "つま先.L",
+        "children": []
+      },
+      {
+        "index": 275,
+        "name": "足先.L",
+        "children": []
+      },
+      {
+        "index": 276,
+        "name": "足首.L",
+        "children": [
+          274,
+          275
+        ]
+      },
+      {
+        "index": 277,
+        "name": "ひざ.L",
+        "children": [
+          276
+        ]
+      },
+      {
+        "index": 278,
+        "name": "足.L",
+        "children": [
+          277
+        ]
+      },
+      {
+        "index": 279,
+        "name": "下半身",
+        "children": [
+          268,
+          273,
+          278
+        ]
+      },
+      {
+        "index": 280,
+        "name": "グルーブ",
+        "children": [
+          191,
+          279
+        ]
+      },
+      {
+        "index": 281,
+        "name": "センター",
+        "children": [
+          280
+        ]
+      },
+      {
+        "index": 282,
+        "name": "つま先ＩＫ.R",
+        "children": []
+      },
+      {
+        "index": 283,
+        "name": "足ＩＫ.R",
+        "children": [
+          282
+        ]
+      },
+      {
+        "index": 284,
+        "name": "つま先ＩＫ.L",
+        "children": []
+      },
+      {
+        "index": 285,
+        "name": "足ＩＫ.L",
+        "children": [
+          284
+        ]
+      },
+      {
+        "index": 286,
+        "name": "全ての親",
+        "children": [
+          281,
+          283,
+          285
+        ]
+      },
+      {
+        "index": 287,
+        "name": "霊夢v2_mesh",
+        "children": []
+      },
+      {
+        "index": 288,
+        "name": "霊夢v2",
+        "children": [
+          287,
+          286
+        ]
+      }
+    ]
+  },
+  "humanoid": {
+    "schema": "VRM1",
+    "humanBones": [
+      {
+        "humanBone": "chest",
+        "node": 173,
+        "nodeName": "上半身2"
+      },
+      {
+        "humanBone": "head",
+        "node": 45,
+        "nodeName": "頭"
+      },
+      {
+        "humanBone": "hips",
+        "node": 281,
+        "nodeName": "センター"
+      },
+      {
+        "humanBone": "leftEye",
+        "node": 22,
+        "nodeName": "目.L"
+      },
+      {
+        "humanBone": "leftFoot",
+        "node": 276,
+        "nodeName": "足首.L"
+      },
+      {
+        "humanBone": "leftHand",
+        "node": 133,
+        "nodeName": "手首.L"
+      },
+      {
+        "humanBone": "leftIndexDistal",
+        "node": 117,
+        "nodeName": "人指３.L"
+      },
+      {
+        "humanBone": "leftIndexIntermediate",
+        "node": 118,
+        "nodeName": "人指２.L"
+      },
+      {
+        "humanBone": "leftIndexProximal",
+        "node": 119,
+        "nodeName": "人指１.L"
+      },
+      {
+        "humanBone": "leftLittleDistal",
+        "node": 129,
+        "nodeName": "小指３.L"
+      },
+      {
+        "humanBone": "leftLittleIntermediate",
+        "node": 130,
+        "nodeName": "小指２.L"
+      },
+      {
+        "humanBone": "leftLittleProximal",
+        "node": 131,
+        "nodeName": "小指１.L"
+      },
+      {
+        "humanBone": "leftLowerArm",
+        "node": 140,
+        "nodeName": "ひじ.L"
+      },
+      {
+        "humanBone": "leftLowerLeg",
+        "node": 277,
+        "nodeName": "ひざ.L"
+      },
+      {
+        "humanBone": "leftMiddleDistal",
+        "node": 121,
+        "nodeName": "中指３.L"
+      },
+      {
+        "humanBone": "leftMiddleIntermediate",
+        "node": 122,
+        "nodeName": "中指２.L"
+      },
+      {
+        "humanBone": "leftMiddleProximal",
+        "node": 123,
+        "nodeName": "中指１.L"
+      },
+      {
+        "humanBone": "leftRingDistal",
+        "node": 125,
+        "nodeName": "薬指３.L"
+      },
+      {
+        "humanBone": "leftRingIntermediate",
+        "node": 126,
+        "nodeName": "薬指２.L"
+      },
+      {
+        "humanBone": "leftRingProximal",
+        "node": 127,
+        "nodeName": "薬指１.L"
+      },
+      {
+        "humanBone": "leftShoulder",
+        "node": 150,
+        "nodeName": "肩.L"
+      },
+      {
+        "humanBone": "leftThumbDistal",
+        "node": 113,
+        "nodeName": "親指２.L"
+      },
+      {
+        "humanBone": "leftThumbMetacarpal",
+        "node": 115,
+        "nodeName": "親指０.L"
+      },
+      {
+        "humanBone": "leftThumbProximal",
+        "node": 114,
+        "nodeName": "親指１.L"
+      },
+      {
+        "humanBone": "leftToes",
+        "node": 274,
+        "nodeName": "つま先.L"
+      },
+      {
+        "humanBone": "leftUpperArm",
+        "node": 147,
+        "nodeName": "腕.L"
+      },
+      {
+        "humanBone": "leftUpperLeg",
+        "node": 278,
+        "nodeName": "足.L"
+      },
+      {
+        "humanBone": "neck",
+        "node": 46,
+        "nodeName": "首"
+      },
+      {
+        "humanBone": "rightEye",
+        "node": 23,
+        "nodeName": "目.R"
+      },
+      {
+        "humanBone": "rightFoot",
+        "node": 271,
+        "nodeName": "足首.R"
+      },
+      {
+        "humanBone": "rightHand",
+        "node": 71,
+        "nodeName": "手首.R"
+      },
+      {
+        "humanBone": "rightIndexDistal",
+        "node": 55,
+        "nodeName": "人指３.R"
+      },
+      {
+        "humanBone": "rightIndexIntermediate",
+        "node": 56,
+        "nodeName": "人指２.R"
+      },
+      {
+        "humanBone": "rightIndexProximal",
+        "node": 57,
+        "nodeName": "人指１.R"
+      },
+      {
+        "humanBone": "rightLittleDistal",
+        "node": 67,
+        "nodeName": "小指３.R"
+      },
+      {
+        "humanBone": "rightLittleIntermediate",
+        "node": 68,
+        "nodeName": "小指２.R"
+      },
+      {
+        "humanBone": "rightLittleProximal",
+        "node": 69,
+        "nodeName": "小指１.R"
+      },
+      {
+        "humanBone": "rightLowerArm",
+        "node": 78,
+        "nodeName": "ひじ.R"
+      },
+      {
+        "humanBone": "rightLowerLeg",
+        "node": 272,
+        "nodeName": "ひざ.R"
+      },
+      {
+        "humanBone": "rightMiddleDistal",
+        "node": 59,
+        "nodeName": "中指３.R"
+      },
+      {
+        "humanBone": "rightMiddleIntermediate",
+        "node": 60,
+        "nodeName": "中指２.R"
+      },
+      {
+        "humanBone": "rightMiddleProximal",
+        "node": 61,
+        "nodeName": "中指１.R"
+      },
+      {
+        "humanBone": "rightRingDistal",
+        "node": 63,
+        "nodeName": "薬指３.R"
+      },
+      {
+        "humanBone": "rightRingIntermediate",
+        "node": 64,
+        "nodeName": "薬指２.R"
+      },
+      {
+        "humanBone": "rightRingProximal",
+        "node": 65,
+        "nodeName": "薬指１.R"
+      },
+      {
+        "humanBone": "rightShoulder",
+        "node": 88,
+        "nodeName": "肩.R"
+      },
+      {
+        "humanBone": "rightThumbDistal",
+        "node": 51,
+        "nodeName": "親指２.R"
+      },
+      {
+        "humanBone": "rightThumbMetacarpal",
+        "node": 53,
+        "nodeName": "親指０.R"
+      },
+      {
+        "humanBone": "rightThumbProximal",
+        "node": 52,
+        "nodeName": "親指１.R"
+      },
+      {
+        "humanBone": "rightToes",
+        "node": 269,
+        "nodeName": "つま先.R"
+      },
+      {
+        "humanBone": "rightUpperArm",
+        "node": 85,
+        "nodeName": "腕.R"
+      },
+      {
+        "humanBone": "rightUpperLeg",
+        "node": 273,
+        "nodeName": "足.R"
+      },
+      {
+        "humanBone": "spine",
+        "node": 191,
+        "nodeName": "上半身"
+      }
+    ]
+  },
+  "expressions": {
+    "schema": "VRM1",
+    "names": [
+      "aa",
+      "angry",
+      "blink",
+      "blinkLeft",
+      "blinkRight",
+      "ee",
+      "happy",
+      "ih",
+      "lookDown",
+      "lookLeft",
+      "lookRight",
+      "lookUp",
+      "neutral",
+      "oh",
+      "ou",
+      "relaxed",
+      "sad",
+      "surprised"
+    ]
+  }
+}

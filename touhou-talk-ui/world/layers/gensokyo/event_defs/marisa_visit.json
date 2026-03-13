@@ -1,0 +1,17 @@
+{
+  "id": "marisa_visit",
+  "location_id": "hakurei_shrine",
+  "probability": 0.25,
+  "cooldown_hours": 12,
+  "constraints": { "time_of_day": ["day", "evening"], "weather_not": ["storm"] },
+  "participants": { "required": ["reimu", "marisa"], "optional": [] },
+  "log_type": "npc_action",
+  "effects": {
+    "state": [
+      { "target": "marisa", "set": { "location_id": "hakurei_shrine", "action": "visit", "emotion": "neutral" } }
+    ],
+    "world": []
+  },
+  "payload": { "summary": "魔理沙が神社にふらっと現れた。" }
+}
+

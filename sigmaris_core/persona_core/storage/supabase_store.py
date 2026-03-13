@@ -501,9 +501,23 @@ class SupabaseEpisodeStore:
     ここでは user_id を分離するため、インスタンス生成時に user_id を固定する。
     """
 
-    def __init__(self, client: SupabaseRESTClient, *, user_id: str) -> None:
+    def __init__(self, client: SupabaseRESTClient, *, user_id: str, character_id: Optional[str] = None) -> None:
         self._c = client
         self._user_id = user_id
+        cid = str(character_id or "").strip()
+        self._character_id: Optional[str] = cid if cid else None
+        # Backward-compatibility: older DB may not have common_episodes.character_id yet.
+        self._supports_character_scope = True
+
+    def _looks_like_missing_character_id(self, err: Exception) -> bool:
+        msg = str(err)
+        return "character_id" in msg and ("column" in msg or "schema" in msg or "Could not find" in msg)
+
+    def _filters(self) -> List[str]:
+        fs = [f"user_id=eq.{self._user_id}"]
+        if self._character_id and self._supports_character_scope:
+            fs.append(f"character_id=eq.{self._character_id}")
+        return fs
 
     def add(self, ep: Episode) -> None:
         d = ep.as_dict()
@@ -511,6 +525,7 @@ class SupabaseEpisodeStore:
         row = {
             "episode_id": d.get("episode_id"),
             "user_id": self._user_id,
+            **({"character_id": self._character_id} if (self._character_id and self._supports_character_scope) else {}),
             "timestamp": d.get("timestamp"),
             "summary": d.get("summary") or "",
             "emotion_hint": d.get("emotion_hint") or "",
@@ -519,16 +534,40 @@ class SupabaseEpisodeStore:
             "embedding": d.get("embedding"),
             "meta": {},
         }
-        self._c.upsert("common_episodes", row, on_conflict="episode_id")
+        try:
+            self._c.upsert("common_episodes", row, on_conflict="episode_id")
+        except Exception as e:
+            if self._supports_character_scope and self._character_id and self._looks_like_missing_character_id(e):
+                self._supports_character_scope = False
+                try:
+                    row.pop("character_id", None)
+                    self._c.upsert("common_episodes", row, on_conflict="episode_id")
+                except Exception:
+                    pass
+            else:
+                raise
 
     def fetch_recent(self, limit: int = 50) -> List[Episode]:
-        rows = self._c.select(
-            "common_episodes",
-            columns="episode_id,timestamp,summary,emotion_hint,traits_hint,raw_context,embedding",
-            filters=[f"user_id=eq.{self._user_id}"],
-            order="timestamp.desc",
-            limit=int(limit),
-        )
+        try:
+            rows = self._c.select(
+                "common_episodes",
+                columns="episode_id,timestamp,summary,emotion_hint,traits_hint,raw_context,embedding",
+                filters=self._filters(),
+                order="timestamp.desc",
+                limit=int(limit),
+            )
+        except Exception as e:
+            if self._supports_character_scope and self._character_id and self._looks_like_missing_character_id(e):
+                self._supports_character_scope = False
+                rows = self._c.select(
+                    "common_episodes",
+                    columns="episode_id,timestamp,summary,emotion_hint,traits_hint,raw_context,embedding",
+                    filters=[f"user_id=eq.{self._user_id}"],
+                    order="timestamp.desc",
+                    limit=int(limit),
+                )
+            else:
+                raise
         out: List[Episode] = []
         for r in rows or []:
             out.append(Episode.from_dict(r))
@@ -540,15 +579,30 @@ class SupabaseEpisodeStore:
         # PostgREST: in 演算子
         # 例: episode_id=in.(a,b)
         joined = ",".join(ids)
-        rows = self._c.select(
-            "common_episodes",
-            columns="episode_id,timestamp,summary,emotion_hint,traits_hint,raw_context,embedding",
-            filters=[
-                f"user_id=eq.{self._user_id}",
-                f"episode_id=in.({joined})",
-            ],
-            order="timestamp.asc",
-        )
+        try:
+            rows = self._c.select(
+                "common_episodes",
+                columns="episode_id,timestamp,summary,emotion_hint,traits_hint,raw_context,embedding",
+                filters=[
+                    *self._filters(),
+                    f"episode_id=in.({joined})",
+                ],
+                order="timestamp.asc",
+            )
+        except Exception as e:
+            if self._supports_character_scope and self._character_id and self._looks_like_missing_character_id(e):
+                self._supports_character_scope = False
+                rows = self._c.select(
+                    "common_episodes",
+                    columns="episode_id,timestamp,summary,emotion_hint,traits_hint,raw_context,embedding",
+                    filters=[
+                        f"user_id=eq.{self._user_id}",
+                        f"episode_id=in.({joined})",
+                    ],
+                    order="timestamp.asc",
+                )
+            else:
+                raise
         return [Episode.from_dict(r) for r in (rows or [])]
 
     def search_embedding(self, vector: List[float], limit: int = 5) -> List[Episode]:

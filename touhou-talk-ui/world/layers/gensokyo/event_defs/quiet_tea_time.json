@@ -1,0 +1,17 @@
+{
+  "id": "quiet_tea_time",
+  "location_id": "hakurei_shrine",
+  "probability": 0.4,
+  "cooldown_hours": 2,
+  "constraints": { "time_of_day": ["day", "evening", "night"] },
+  "participants": { "required": ["reimu"], "optional": [] },
+  "log_type": "system",
+  "effects": {
+    "state": [
+      { "target": "reimu", "set": { "location_id": "hakurei_shrine", "action": "tea_time", "emotion": "calm" } }
+    ],
+    "world": []
+  },
+  "payload": { "summary": "神社は静かで、霊夢はお茶を淹れている。" }
+}
+

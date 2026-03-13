@@ -1,0 +1,48 @@
+{
+  "locations": [
+    {
+      "id": "hakurei_shrine",
+      "name": "博麗神社",
+      "tags": ["shrine", "outdoor", "public"],
+      "density": "high",
+      "capacity": 6,
+      "sub_locations": ["kei_dai", "engawa", "haiden"],
+      "neighbors": ["human_village", "youkai_mountain_foot"]
+    },
+    {
+      "id": "human_village",
+      "name": "人間の里",
+      "tags": ["town", "public"],
+      "density": "high",
+      "capacity": 12,
+      "sub_locations": ["market", "alley"],
+      "neighbors": ["hakurei_shrine", "forest_of_magic"]
+    },
+    {
+      "id": "youkai_mountain_foot",
+      "name": "妖怪の山（麓）",
+      "tags": ["mountain", "outdoor"],
+      "density": "med",
+      "capacity": 5,
+      "sub_locations": [],
+      "neighbors": ["hakurei_shrine"]
+    },
+    {
+      "id": "forest_of_magic",
+      "name": "魔法の森",
+      "tags": ["forest", "quiet"],
+      "density": "low",
+      "capacity": 3,
+      "sub_locations": [],
+      "neighbors": ["human_village"]
+    }
+  ],
+  "sub_locations": [
+    { "id": "kei_dai", "parent": "hakurei_shrine", "name": "境内", "tags": ["outdoor"], "capacity": 4 },
+    { "id": "engawa", "parent": "hakurei_shrine", "name": "縁側", "tags": ["rest", "quiet"], "capacity": 2 },
+    { "id": "haiden", "parent": "hakurei_shrine", "name": "拝殿", "tags": ["indoor", "quiet"], "capacity": 2 },
+    { "id": "market", "parent": "human_village", "name": "市場", "tags": ["busy"], "capacity": 8 },
+    { "id": "alley", "parent": "human_village", "name": "路地裏", "tags": ["quiet"], "capacity": 3 }
+  ]
+}
+

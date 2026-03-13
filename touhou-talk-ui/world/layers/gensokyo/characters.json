@@ -1,0 +1,25 @@
+{
+  "characters": [
+    { "id": "reimu", "name": "博麗霊夢", "home_location_id": "hakurei_shrine", "default_emotion": "neutral", "traits": ["lazy", "pragmatic"], "speech_style": "reimu" },
+    { "id": "marisa", "name": "霧雨魔理沙", "home_location_id": "forest_of_magic", "default_emotion": "neutral", "traits": ["curious", "bold"], "speech_style": "marisa" },
+    { "id": "alice", "name": "アリス", "home_location_id": "forest_of_magic", "default_emotion": "neutral", "traits": ["calm"], "speech_style": "alice" },
+    { "id": "aya", "name": "射命丸文", "home_location_id": "youkai_mountain_foot", "default_emotion": "neutral", "traits": ["fast", "nosy"], "speech_style": "aya" },
+    { "id": "sanae", "name": "東風谷早苗", "home_location_id": "youkai_mountain_foot", "default_emotion": "neutral", "traits": ["earnest"], "speech_style": "sanae" },
+    { "id": "suwako", "name": "洩矢諏訪子", "home_location_id": "youkai_mountain_foot", "default_emotion": "neutral", "traits": ["mischief"], "speech_style": "suwako" },
+    { "id": "nitori", "name": "河城にとり", "home_location_id": "youkai_mountain_foot", "default_emotion": "neutral", "traits": ["engineer"], "speech_style": "nitori" },
+    { "id": "youmu", "name": "魂魄妖夢", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["serious"], "speech_style": "youmu" },
+    { "id": "yuyuko", "name": "西行寺幽々子", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["airheaded"], "speech_style": "yuyuko" },
+    { "id": "sakuya", "name": "十六夜咲夜", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["precise"], "speech_style": "sakuya" },
+    { "id": "remilia", "name": "レミリア", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["proud"], "speech_style": "remilia" },
+    { "id": "flandre", "name": "フランドール", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["childlike"], "speech_style": "flandre" },
+    { "id": "patchouli", "name": "パチュリー", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["bookish"], "speech_style": "patchouli" },
+    { "id": "meiling", "name": "美鈴", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["friendly"], "speech_style": "meiling" },
+    { "id": "reisen", "name": "鈴仙", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["wary"], "speech_style": "reisen" },
+    { "id": "satori", "name": "さとり", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["sharp"], "speech_style": "satori" },
+    { "id": "koishi", "name": "こいし", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["whimsical"], "speech_style": "koishi" },
+    { "id": "okuu", "name": "お空", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["powerful"], "speech_style": "okuu" },
+    { "id": "rin", "name": "お燐", "home_location_id": "human_village", "default_emotion": "neutral", "traits": ["sly"], "speech_style": "rin" },
+    { "id": "momiji", "name": "犬走椛", "home_location_id": "youkai_mountain_foot", "default_emotion": "neutral", "traits": ["guard"], "speech_style": "momiji" }
+  ]
+}
+
