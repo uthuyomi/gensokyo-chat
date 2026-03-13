@@ -68,6 +68,7 @@ load_dotenv(override=False)
 DEFAULT_MODEL = os.getenv("SIGMARIS_PERSONA_MODEL", "gpt-5.2")
 DEFAULT_EMBEDDING_MODEL = os.getenv("SIGMARIS_EMBEDDING_MODEL", "text-embedding-3-small")
 DEFAULT_USER_ID = os.getenv("SIGMARIS_DEFAULT_USER_ID", "default-user")
+INTERNAL_TOKEN = (os.getenv("SIGMARIS_INTERNAL_TOKEN", "") or "").strip() or None
 
 META_VERSION = 1
 ENGINE_VERSION = os.getenv("SIGMARIS_ENGINE_VERSION", "sigmaris-core")
@@ -300,7 +301,10 @@ def _auth_api_key() -> Optional[str]:
     return None
 
 
-def get_auth_context(authorization: Optional[str] = Header(default=None)) -> Optional[AuthContext]:
+def get_auth_context(
+    authorization: Optional[str] = Header(default=None),
+    x_sigmaris_internal_token: Optional[str] = Header(default=None, alias="X-Sigmaris-Internal-Token"),
+) -> Optional[AuthContext]:
     """
     Public deployment invariant:
     - Derive user_id from validated bearer token.
@@ -308,6 +312,10 @@ def get_auth_context(authorization: Optional[str] = Header(default=None)) -> Opt
 
     If auth is not required (local demo), returns None.
     """
+    # Internal token bypass (intended for local/dev service-to-service calls).
+    if INTERNAL_TOKEN and x_sigmaris_internal_token and str(x_sigmaris_internal_token).strip() == INTERNAL_TOKEN:
+        return AuthContext(user_id=DEFAULT_USER_ID, email=None)
+
     if not _auth_required:
         return None
 
@@ -2178,7 +2186,7 @@ async def persona_chat(req: ChatRequest, auth: Optional[AuthContext] = Depends(g
             init_tid = None
 
         # user_id ごとに EpisodeStore を分離（同一 user の記憶が永続化される）
-        episode_store = SupabaseEpisodeStore(_supabase, user_id=user_id)
+        episode_store = SupabaseEpisodeStore(_supabase, user_id=user_id, character_id=req.character_id)
 
         # wiring（requestごとに controller を組み立てて、DBの状態を正とする）
         selective_recall = SelectiveRecall(memory_backend=episode_store, embedding_model=embedding_model)
@@ -2662,7 +2670,7 @@ async def persona_chat_stream(req: ChatRequest, auth: Optional[AuthContext] = De
                 init_tid = TemporalIdentityState.from_dict(st)
         except Exception:
             init_tid = None
-        episode_store = SupabaseEpisodeStore(_supabase, user_id=user_id)
+        episode_store = SupabaseEpisodeStore(_supabase, user_id=user_id, character_id=req.character_id)
 
         selective_recall = SelectiveRecall(memory_backend=episode_store, embedding_model=embedding_model)
         ambiguity_resolver = AmbiguityResolver(embedding_model=embedding_model)

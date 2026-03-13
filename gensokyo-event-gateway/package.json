@@ -1,0 +1,21 @@
+{
+  "name": "gensokyo-event-gateway",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file=../.env --enable-source-maps dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file=../.env dist/index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.8.2"
+  }
+}
+
