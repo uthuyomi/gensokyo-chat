@@ -65,6 +65,8 @@
   "build": {
     "appId": "dev.sigmaris.touhou-talk",
     "productName": "Touhou Talk",
+    "npmRebuild": false,
+    "nodeGypRebuild": false,
     "directories": {
       "output": "dist-desktop"
     },
