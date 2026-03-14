@@ -5,6 +5,14 @@ const path = require("node:path");
 
 const isDev = !app.isPackaged;
 
+// Allow dev/pro users to force userData dir (also enables desktop runtime in Next dev).
+const requestedUserDataDir = String(process.env.TOUHOU_DESKTOP_USERDATA_DIR ?? "").trim();
+if (requestedUserDataDir) {
+  try {
+    app.setPath("userData", requestedUserDataDir);
+  } catch {}
+}
+
 function readEnvFile(p) {
   try {
     const txt = fs.readFileSync(p, "utf8");

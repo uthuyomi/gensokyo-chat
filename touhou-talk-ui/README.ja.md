@@ -99,6 +99,13 @@ Supabase Dashboard で利用したい OAuth provider を有効化し、Redirect 
 
 ## デスクトップ版（Windows, 任意）
 
+開発中にVRM/TTSなど **デスクトップ専用設定** を動かしたい場合も、`npm run desktop:dev` だけでOKです（Next devサーバにもデスクトップ用の環境変数を注入します）。
+
+```bash
+cd touhou-talk-ui
+npm run desktop:dev
+```
+
 ```bash
 cd touhou-talk-ui
 npm run desktop:dist
