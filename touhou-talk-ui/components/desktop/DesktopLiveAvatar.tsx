@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import VrmStage from "@/components/vrm/VrmStage";
+import { useAquesTalkAudioTts } from "@/hooks/useAquesTalkAudioTts";
 
 type ThreadMessageContent = unknown;
 
@@ -45,102 +46,38 @@ type DesktopCharacterSettings = {
   };
 };
 
-function useDesktopTts(characterId: string | null) {
-  const [speaking, setSpeaking] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const urlRef = useRef<string | null>(null);
-  const ctxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
-  const timeBufRef = useRef<Uint8Array | null>(null);
+export default function DesktopLiveAvatar({
+  characterId,
+  className,
+}: {
+  characterId: string | null;
+  className?: string;
+}) {
+  const enabled = useMemo(() => isElectronUa(), []);
+  const aques = useAquesTalkAudioTts();
+  const [browserSpeaking, setBrowserSpeaking] = useState(false);
 
-  const stop = () => {
+  const stopAll = () => {
     try {
-      const a = audioRef.current;
-      if (a) {
-        a.pause();
-        a.src = "";
-      }
+      aques.cancel();
     } catch {
       // ignore
     }
     try {
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      const synth = typeof window !== "undefined" ? window.speechSynthesis : null;
+      synth?.cancel?.();
     } catch {
       // ignore
     }
-    urlRef.current = null;
-    setSpeaking(false);
+    setBrowserSpeaking(false);
   };
-
-  useEffect(() => {
-    return () => {
-      stop();
-      try {
-        ctxRef.current?.close();
-      } catch {
-        // ignore
-      }
-      ctxRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const getLipSyncFrame = useMemo(() => {
-    return () => {
-      const analyser = analyserRef.current;
-      if (!analyser) return { level: 0, weights: null as any };
-
-      const n = analyser.fftSize || 2048;
-      if (!timeBufRef.current || timeBufRef.current.length !== n) {
-        timeBufRef.current = new Uint8Array(n);
-      }
-      const buf = timeBufRef.current;
-      analyser.getByteTimeDomainData(buf);
-      let sum = 0;
-      for (let i = 0; i < buf.length; i += 1) {
-        const v = (buf[i] - 128) / 128;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / Math.max(1, buf.length));
-      // Mild compression & boost for easier lip sync.
-      const level = Math.max(0, Math.min(1, Math.pow(rms * 2.2, 0.8)));
-      return { level, weights: null };
-    };
-  }, []);
 
   const speak = async (text: string) => {
     if (!characterId) return;
     const t = stripForTts(text);
     if (!t) return;
 
-    // Ensure audio graph exists (user gesture may be required; best-effort).
-    try {
-      if (!audioRef.current) audioRef.current = new Audio();
-      const audio = audioRef.current;
-
-      const ensureGraph = () => {
-        if (typeof window === "undefined") return;
-        if (!ctxRef.current) ctxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const ctx = ctxRef.current!;
-        if (!analyserRef.current) {
-          const an = ctx.createAnalyser();
-          an.fftSize = 2048;
-          an.smoothingTimeConstant = 0.65;
-          analyserRef.current = an;
-        }
-        if (!mediaSourceRef.current) {
-          mediaSourceRef.current = ctx.createMediaElementSource(audio);
-          mediaSourceRef.current.connect(analyserRef.current!);
-          analyserRef.current!.connect(ctx.destination);
-        }
-      };
-      ensureGraph();
-    } catch {
-      // ignore (lip sync will just be silent)
-    }
-
-    stop();
+    stopAll();
 
     // Query desktop settings (to decide mode). If this fails, just skip TTS.
     let mode: "none" | "browser" | "aquestalk" = "none";
@@ -168,63 +105,27 @@ function useDesktopTts(characterId: string | null) {
         synth.cancel();
         const u = new Utterance(t);
         u.lang = "ja-JP";
-        u.onstart = () => setSpeaking(true);
-        u.onend = () => setSpeaking(false);
-        u.onerror = () => setSpeaking(false);
+        u.onstart = () => setBrowserSpeaking(true);
+        u.onend = () => setBrowserSpeaking(false);
+        u.onerror = () => setBrowserSpeaking(false);
         synth.speak(u);
       } catch {
-        setSpeaking(false);
+        setBrowserSpeaking(false);
       }
       return;
     }
 
     if (mode !== "aquestalk" || !aqEnabled) return;
 
+    // AquesTalk: drive both audio-level and viseme weights (koe) to MotionManager.
+    // Note: we do NOT pass speed/voice here, so the server can pull them from per-character settings via `?char=`.
     try {
-      setSpeaking(true);
-      const res = await fetch(`/api/tts/aquestalk1?char=${encodeURIComponent(characterId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: t }),
-      });
-      if (!res.ok) {
-        setSpeaking(false);
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      urlRef.current = url;
-
-      if (!audioRef.current) audioRef.current = new Audio();
-      const audio = audioRef.current;
-      audio.src = url;
-      audio.onended = () => setSpeaking(false);
-      audio.onerror = () => setSpeaking(false);
-
-      try {
-        await ctxRef.current?.resume?.();
-      } catch {
-        // ignore
-      }
-
-      await audio.play();
+      await aques.unlockAudio(); // best-effort (may still require user gesture)
     } catch {
-      setSpeaking(false);
+      // ignore
     }
+    await aques.speak({ text: t, characterId });
   };
-
-  return { speaking, getLipSyncFrame, speak, stop };
-}
-
-export default function DesktopLiveAvatar({
-  characterId,
-  className,
-}: {
-  characterId: string | null;
-  className?: string;
-}) {
-  const enabled = useMemo(() => isElectronUa(), []);
-  const { speaking, getLipSyncFrame, speak, stop } = useDesktopTts(characterId);
 
   const [vrmRev, setVrmRev] = useState<string>("");
 
@@ -237,7 +138,7 @@ export default function DesktopLiveAvatar({
 
   useEffect(() => {
     // When switching character, stop any current audio to avoid cross-talk.
-    stop();
+    stopAll();
     lastSpokenIdRef.current = null;
     setVrmRev("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -281,12 +182,15 @@ export default function DesktopLiveAvatar({
   if (!enabled || !characterId) return null;
 
   const url = `/api/vrm/${encodeURIComponent(characterId)}${vrmRev ? `?rev=${encodeURIComponent(vrmRev)}` : ""}`;
+  const ttsSpeaking = aques.speaking || browserSpeaking;
+  const stageSpeaking = isRunning || ttsSpeaking;
+  const getLipSyncFrame = aques.getLipSyncFrame;
 
   return (
     <div className={className}>
       <VrmStage
         url={url}
-        speaking={speaking}
+        speaking={stageSpeaking}
         getLipSyncFrame={getLipSyncFrame}
         className="h-full w-full"
       />
