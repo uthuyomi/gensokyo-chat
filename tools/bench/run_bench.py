@@ -12,9 +12,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SIGMARIS_CORE = REPO_ROOT / "sigmaris_core"
+SIGMARIS_CORE = REPO_ROOT / "gensokyo-persona-core"
 
-# Ensure we import the *real* persona_core package under sigmaris_core/,
+# Ensure we import the *real* persona_core package under gensokyo-persona-core/,
 # not the legacy top-level persona_core/ folder (if present).
 sys.path.insert(0, str(SIGMARIS_CORE))
 
@@ -420,4 +420,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

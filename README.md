@@ -20,8 +20,7 @@ Sigmaris is split into a backend “engine” and multiple UIs that consume it.
 
 | Project | What it is | Link |
 |---|---|---|
-| `sigmaris_core` | **The core engine** (Persona OS API). Memory/identity/drift/state/safety/observability live here. | `sigmaris_core/README.md` |
-| `sigmaris-os` | **Reference UI** that exposes the core faithfully (chat + dashboards). | `sigmaris-os/README.md` |
+| `gensokyo-persona-core` | **The core engine** (Persona OS API). Memory/identity/drift/state/safety/observability live here. | `gensokyo-persona-core/README.md` |
 | `touhou-talk-ui` | **Variant UI** to stress-test the engine’s generality (character chat UX, assistant-ui, optional desktop wrapper). | `touhou-talk-ui/README.md` |
 | `supabase` | Unified schema for persistence (`common_*`). | `supabase/RESET_TO_COMMON.sql` |
 
@@ -110,8 +109,8 @@ And Phase02 adds **time-structured stability** on top:
 
 ```mermaid
 flowchart LR
-  U[User] --> FE[Next.js UI<br/>sigmaris-os]
-  FE -->|POST /api/aei/stream| FEAPI[Next.js Route Handler]
+  U[User] --> FE[Next.js UI<br/>touhou-talk-ui]
+  FE -->|POST /api/session/:id/message| FEAPI[Next.js Route Handler]
   FEAPI -->|POST /persona/chat/stream| BE[FastAPI<br/>persona_core.server_persona_os]
   BE -->|reply + meta| FEAPI
   FEAPI -->|insert| SB[(Supabase<br/>common_messages / common_state_snapshots)]
@@ -123,15 +122,13 @@ flowchart LR
 
 ## Repository layout
 
-- `sigmaris_core/` - Persona OS backend (memory / identity / drift / state machine / trace)
-- `sigmaris-os/` - Next.js frontend (Supabase Auth, chat UI, `/status` dashboard)
+- `gensokyo-persona-core/` - Persona OS backend (memory / identity / drift / state machine / trace)
 - `touhou-talk-ui/` - character chat UI (Touhou personas, voice/TTS experiments, etc.)
 - `supabase/RESET_TO_COMMON.sql` - **authoritative Supabase schema** (destructive reset to `common_*` tables)
 
 Deprecated schemas (kept for reference):
 
-- `sigmaris-os/supabase/FRONTEND_SCHEMA.sql`
-- `sigmaris_core/persona_core/storage/SUPABASE_SCHEMA.sql`
+- `gensokyo-persona-core/persona_core/storage/SUPABASE_SCHEMA.sql`
 - `touhou-talk-ui/supabase/TOUHOU_SCHEMA.sql`
 
 ---
@@ -164,19 +161,18 @@ curl -N -X POST "http://127.0.0.1:8000/persona/chat/stream" \
   -d '{"user_id":"u_test_001","session_id":"s_test_001","message":"Hello. Stream your reply."}'
 ```
 
-### 2) Frontend (Next.js)
+### 2) UI (Next.js / touhou-talk-ui)
 
-1. Copy `sigmaris-os/.env.example` -> `sigmaris-os/.env.local` and set your Supabase values
+1. Set env (Supabase + core URL) under `touhou-talk-ui/.env.local` (see `touhou-talk-ui/README.md`)
 2. Run:
 
 ```bash
-cd sigmaris-os
+cd touhou-talk-ui
 npm install
 npm run dev
 ```
 
 - App: `http://localhost:3000`
-- Dashboard: `http://localhost:3000/status`
 
 ---
 
@@ -242,8 +238,6 @@ After deploy:
 ## Operator overrides (optional)
 
 Sigmaris supports audited operator overrides via `POST /persona/operator/override`.
-
-In `sigmaris-os`, the `/status` page can show an Operator panel to set a forced Subjectivity mode and/or freeze drift updates.
 
 Environment variables (server-side only):
 

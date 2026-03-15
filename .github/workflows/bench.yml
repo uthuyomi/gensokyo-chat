@@ -18,8 +18,7 @@ jobs:
           python-version: "3.11"
 
       - name: Compile (sanity)
-        run: python -m compileall -q sigmaris_core/persona_core
+        run: python -m compileall -q gensokyo-persona-core/persona_core
 
       - name: Run benchmark
         run: python tools/bench/run_bench.py
-

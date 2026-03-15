@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import path from "node:path";
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
+import { Readable } from "node:stream";
 import {
   characterMotionLibraryDir,
   characterRootDir,
@@ -97,12 +98,34 @@ export async function GET(req: Request, ctx: { params: unknown }) {
   }
 
   try {
-    const buf = await fs.readFile(abs);
-    return new NextResponse(buf, {
+    const st = await fs.stat(abs);
+    if (!st.isFile()) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+    // Use weak ETag so browser/GLTFLoader can avoid re-downloading unchanged motions.
+    const etag = `W/\"${String(st.size)}-${String(Math.floor(Number(st.mtimeMs) || 0))}\"`;
+    const inm = req.headers.get("if-none-match") ?? "";
+    if (inm && inm === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          "Cache-Control": "private, max-age=0, must-revalidate",
+        },
+      });
+    }
+
+    // Stream the file to avoid buffering large GLBs into Node's memory (prevents OOM crashes).
+    const nodeStream = createReadStream(abs);
+    const webStream = Readable.toWeb(nodeStream) as unknown as ReadableStream<Uint8Array>;
+
+    return new NextResponse(webStream as any, {
       status: 200,
       headers: {
         "Content-Type": "model/gltf-binary",
-        "Cache-Control": "no-store",
+        "Content-Length": String(st.size),
+        "Last-Modified": new Date(st.mtimeMs).toUTCString(),
+        ETag: etag,
+        "Cache-Control": "private, max-age=0, must-revalidate",
       },
     });
   } catch (e) {

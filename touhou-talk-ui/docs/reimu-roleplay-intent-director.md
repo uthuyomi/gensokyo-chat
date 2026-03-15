@@ -78,7 +78,7 @@ UI 側で `persona_system` 末尾に **ターン限定の上書きブロック**
   - `persona_system` への overlay 追記
   - lint → 失敗時 1 回だけリライト
   - `meta.touhou_ui` に intent/forced 結果を保存
-- core: `sigmaris_core/persona_core/server_persona_os.py`
+- core: `gensokyo-persona-core/persona_core/server_persona_os.py`
   - `POST /persona/intent` 追加（JSON-only）
 
 ## 将来（他キャラ展開）

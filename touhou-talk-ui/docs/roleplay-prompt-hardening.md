@@ -1,8 +1,8 @@
-# roleplayモードのプロンプト注入を安定化する（touhou-talk-ui × sigmaris_core）
+# roleplayモードのプロンプト注入を安定化する（touhou-talk-ui × gensokyo-persona-core）
 
 目的は「キャラ再現度のために強い persona_system を入れたい」時に、core側の後段注入（自然さ・会話契約・メモリ等）が綱引きになって破綻するのを避けること。
 
-この変更は **roleplayモードのみ** を主対象にしている（sigmaris-os など他アプリへの影響を最小にするため）。
+この変更は **roleplayモードのみ** を主対象にしている（他アプリへの影響を最小にするため）。
 
 ## 何が起きていたか（問題）
 
@@ -18,9 +18,9 @@
 
 ### 1) core側：roleplayでは“綱引き”を減らす
 
-- `sigmaris_core/persona_core/phase03/conversation_contract.py`
+- `gensokyo-persona-core/persona_core/phase03/conversation_contract.py`
   - `chat_mode == "roleplay"` のとき、会話契約（contract）を適用しない。
-- `sigmaris_core/persona_core/phase03/roleplay_character_policy.py`
+- `gensokyo-persona-core/persona_core/phase03/roleplay_character_policy.py`
   - `chat_mode == "roleplay"` かつ `metadata.persona_system` が存在する（UIが外部personaを注入している）場合、
     - `disable_naturalness_injection=True`
     - `stop_memory_injection=True`
@@ -57,4 +57,3 @@
 - roleplayの品質は **UIが送る persona_system の設計に強く依存**する。
   - core側の“汎用補正”を止めた分、personaが雑だと雑なまま返る。
 - `persona_system_sha256` は「同一personaかの識別」用で、内容の復元はできない。
-

@@ -2,7 +2,7 @@
 -- ============================================================
 -- This script is DESTRUCTIVE: it drops the legacy tables and recreates
 -- a unified `common_*` schema that can be shared by:
--- - sigmaris-os (ops/dashboard UI)
+-- - UI (touhou-talk-ui / other clients)
 -- - touhou-talk-ui (character chat UI)
 --
 -- Assumptions:
@@ -38,7 +38,7 @@ drop table if exists public.messages cascade;
 drop table if exists public.growth_logs cascade;
 drop table if exists public.safety_logs cascade;
 
--- sigmaris_core/persona_core/storage/SUPABASE_SCHEMA.sql legacy tables
+-- gensokyo-persona-core/persona_core/storage/SUPABASE_SCHEMA.sql legacy tables
 drop table if exists public.sigmaris_trace_events cascade;
 drop table if exists public.sigmaris_safety_assessments cascade;
 
@@ -102,7 +102,7 @@ create table if not exists public.common_messages (
 
   app text not null default 'sigmaris' check (app in ('sigmaris','touhou')),
 
-  -- Optional: used by sigmaris-os session list/rename flows.
+  -- Optional: used by UI session list/rename flows.
   session_title text null,
 
   role text not null check (role in ('user','ai')),
@@ -511,7 +511,7 @@ create table if not exists public.common_trace_events (
 create index if not exists idx_common_trace_events_user_created
   on public.common_trace_events (user_id, created_at desc);
 
--- Persona (sigmaris-os UI)
+-- Persona (UI)
 create table if not exists public.common_persona (
   user_id uuid primary key,
   calm real not null default 0.5,

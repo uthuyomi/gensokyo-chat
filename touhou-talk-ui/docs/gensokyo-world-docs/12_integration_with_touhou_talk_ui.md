@@ -68,11 +68,11 @@ Touhou-talkは「同じユーザーでも、キャラごとに関係値・記憶
   - UI（Next.js route）で relation を読み、**persona_system にソフトに注入**する（数値は表示しない）
   - world-engine は会話イベント（例: `user_say`）に応じて relation を best-effort で更新できる
 - Character Scoped Memory（Episodic）
-  - sigmaris_core の `common_episodes` を `user_id + character_id` でフィルタする
+  - gensokyo-persona-core の `common_episodes` を `user_id + character_id` でフィルタする
   - 霊夢に話した内容が、魔理沙に自動で漏れない
 
 > 重要: 「世界状態の更新」は world-engine の責務。  
-> 「会話生成（persona / memory）」は sigmaris_core の責務。  
+> 「会話生成（persona / memory）」は gensokyo-persona-core の責務。  
 > UIは “材料を渡すだけ” に寄せる。
 
 ---
