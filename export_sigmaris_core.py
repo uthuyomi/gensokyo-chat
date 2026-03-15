@@ -4,8 +4,8 @@ sigmaris-core 以下のすべての .py ファイルを集約し、
 1万行ごとに分割してテキストファイルとして書き出すツール。
 
 出力ファイル名:
-    sigmaris_core_dump_part_1.txt
-    sigmaris_core_dump_part_2.txt
+    gensokyo_persona_core_dump_part_1.txt
+    gensokyo_persona_core_dump_part_2.txt
     ...
 """
 
@@ -19,7 +19,7 @@ from typing import List
 MAX_LINES_PER_FILE = 10_000
 
 # 収集対象ディレクトリ名（このスクリプトと同じ階層にある前提）
-TARGET_DIR_NAME = "sigmaris_core"
+TARGET_DIR_NAME = "gensokyo-persona-core"
 
 
 def collect_python_files(root: Path) -> List[Path]:
@@ -73,7 +73,7 @@ def build_aggregated_lines(files: List[Path], root: Path) -> List[str]:
     return lines
 
 
-def write_split_files(all_lines: List[str], output_prefix: str = "sigmaris_core_dump_part_") -> None:
+def write_split_files(all_lines: List[str], output_prefix: str = "gensokyo_persona_core_dump_part_") -> None:
     """
     行リストを MAX_LINES_PER_FILE ごとに分割してテキストファイルへ書き出す。
     """

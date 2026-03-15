@@ -85,8 +85,8 @@ Player↔Character relation更新（会話イベント）：
 - `GENSOKYO_REL_DELTA_TRUST_SAY`（既定 `0.004`）
 - `GENSOKYO_REL_DELTA_FRIENDSHIP_SAY`（既定 `0.006`）
 
-sigmaris_core（認証・ローカル安定運用）：
-- `SIGMARIS_INTERNAL_TOKEN`（推奨: world-engine → sigmaris_core の内部呼び出しを安定化）
+gensokyo-persona-core（認証・ローカル安定運用）：
+- `SIGMARIS_INTERNAL_TOKEN`（推奨: world-engine → gensokyo-persona-core の内部呼び出しを安定化）
 
 Command worker：
 - `GENSOKYO_COMMAND_WORKER_ENABLED`（既定 `1`）

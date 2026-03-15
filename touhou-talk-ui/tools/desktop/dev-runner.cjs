@@ -29,7 +29,7 @@ function ensureEnvTemplate(envPath) {
     "NEXT_PUBLIC_SUPABASE_ANON_KEY=",
     "SUPABASE_SERVICE_ROLE_KEY=",
     "",
-    "# Backend Persona OS URL (FastAPI / sigmaris_core)",
+    "# Backend Persona OS URL (FastAPI / gensokyo-persona-core)",
     "SIGMARIS_CORE_URL=http://127.0.0.1:8000",
     "",
     "# Optional: force port",

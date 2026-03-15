@@ -21,18 +21,15 @@ Sigmaris は「コア（エンジン）」と、それを利用する複数のUI
 
 | プロジェクト | 役割 | リンク |
 |---|---|---|
-| `sigmaris_core` | **すべてのコア**（Persona OS API）。記憶/同一性/ドリフト/状態/安全/可観測性はここに集約。 | `sigmaris_core/README.ja.md` |
-| `sigmaris-os` | **コアを忠実に表に出すUI**（チャット + ダッシュボード）。 | `sigmaris-os/README.ja.md` |
+| `gensokyo-persona-core` | **すべてのコア**（Persona OS API）。記憶/同一性/ドリフト/状態/安全/可観測性はここに集約。 | `gensokyo-persona-core/README.ja.md` |
 | `touhou-talk-ui` | **コアをエンジンとして汎用性を試す分岐UI**（キャラチャットUX/assistant-ui/任意でデスクトップ化）。 | `touhou-talk-ui/README.ja.md` |
 | `supabase` | 永続化の統一スキーマ（`common_*`）。 | `supabase/RESET_TO_COMMON.sql` |
 
 このリポジトリに含まれるもの:
 
 - **Backend (Python/FastAPI)**: `POST /persona/chat`（JSON）と `POST /persona/chat/stream`（SSEストリーミング）
-- **Frontend (Next.js + Supabase Auth)**: Googleログイン -> チャット -> **状態ダッシュボード**（`/status`）
 - **キャラクターチャットUI (Next.js + Supabase Auth)**: `touhou-talk-ui/`（同じエンジン、別UX）
 - **Supabase 永続化**: チャットログと状態スナップショットを時系列で保存し、グラフ化する
-- **メモリ管理UI**: 永続メモリ（episode）の一覧・削除（`/memory`）
 
 ---
 
@@ -112,8 +109,8 @@ Phase02 では、これに加えて「時間軸の安定性」を扱います。
 
 ```mermaid
 flowchart LR
-  U[User] --> FE[Next.js UI<br/>sigmaris-os]
-  FE -->|POST /api/aei/stream| FEAPI[Next.js Route Handler]
+  U[User] --> FE[Next.js UI<br/>touhou-talk-ui]
+  FE -->|POST /api/session/:id/message| FEAPI[Next.js Route Handler]
   FEAPI -->|POST /persona/chat/stream| BE[FastAPI<br/>persona_core.server_persona_os]
   BE -->|reply + meta| FEAPI
   FEAPI -->|insert| SB[(Supabase<br/>common_messages / common_state_snapshots)]
@@ -125,15 +122,13 @@ flowchart LR
 
 ## Repository layout
 
-- `sigmaris_core/` - Persona OS backend（memory / identity / drift / state machine / trace）
-- `sigmaris-os/` - Next.js frontend（Supabase Auth, chat UI, `/status` dashboard）
+- `gensokyo-persona-core/` - Persona OS backend（memory / identity / drift / state machine / trace）
 - `touhou-talk-ui/` - キャラクターチャットUI（東方キャラ、音声/TTS 実験など）
 - `supabase/RESET_TO_COMMON.sql` - **正とするSupabaseスキーマ**（`common_*` に破壊的リセット）
 
 旧スキーマ（参考として残しています）:
 
-- `sigmaris-os/supabase/FRONTEND_SCHEMA.sql`
-- `sigmaris_core/persona_core/storage/SUPABASE_SCHEMA.sql`
+- `gensokyo-persona-core/persona_core/storage/SUPABASE_SCHEMA.sql`
 - `touhou-talk-ui/supabase/TOUHOU_SCHEMA.sql`
 
 ---
@@ -166,19 +161,18 @@ curl -N -X POST "http://127.0.0.1:8000/persona/chat/stream" \
   -d '{"user_id":"u_test_001","session_id":"s_test_001","message":"Hello. Stream your reply."}'
 ```
 
-### 2) Frontend (Next.js)
+### 2) UI（Next.js / touhou-talk-ui）
 
-1. `sigmaris-os/.env.example` -> `sigmaris-os/.env.local` にコピーしてSupabaseの値を設定
+1. `touhou-talk-ui/.env.local` に（Supabase + core URL など）を設定（`touhou-talk-ui/README.ja.md` 参照）
 2. 起動:
 
 ```bash
-cd sigmaris-os
+cd touhou-talk-ui
 npm install
 npm run dev
 ```
 
 - App: `http://localhost:3000`
-- Dashboard: `http://localhost:3000/status`
 
 ---
 
@@ -244,8 +238,6 @@ flyctl deploy
 ## Operator overrides（任意）
 
 Sigmaris は運用者による上書き（監査ログ付き）を `POST /persona/operator/override` で受け付けます。
-
-`sigmaris-os` では `/status` に Operator パネルを出して、Subjectivity Mode の強制（AUTO/S0..S3）や drift の freeze を設定できます。
 
 必要な環境変数（サーバ側のみ）:
 

@@ -8,13 +8,13 @@ It is a UI variant in **Project Sigmaris** and uses:
 
 - **Supabase Auth** (OAuth) for login
 - **Supabase DB** for session/message persistence
-- **Sigmaris Persona OS backend** (`sigmaris_core`) for response generation (`/persona/chat`, `/persona/chat/stream`)
+- **Sigmaris Persona OS backend** (`gensokyo-persona-core`) for response generation (`/persona/chat`, `/persona/chat/stream`)
 
 ## What’s in here
 
 - Next.js App Router UI (`/entry`, `/chat/session`, `/auth/*`)
 - Session-based chat persistence in Supabase (`common_sessions`, `common_messages`)
-- Server-side API routes that proxy to `sigmaris_core` and optionally enrich messages (uploads / link analysis / web tools)
+- Server-side API routes that proxy to `gensokyo-persona-core` and optionally enrich messages (uploads / link analysis / web tools)
 - Optional PWA manifest (`public/site.webmanifest`) and service worker registration (`/sw.js`)
 - Optional Windows desktop packaging (Electron)
 
@@ -22,7 +22,7 @@ It is a UI variant in **Project Sigmaris** and uses:
 
 - Node.js + npm
 - A Supabase project (URL / anon key / service role key)
-- A running `sigmaris_core` backend (default: `http://127.0.0.1:8000`)
+- A running `gensokyo-persona-core` backend (default: `http://127.0.0.1:8000`)
 
 ## Environment variables
 
@@ -43,8 +43,8 @@ Recommended (ops / hardening):
 
 Optional (Phase04 features for `/api/session/[sessionId]/message`):
 
-- `TOUHOU_UPLOAD_ENABLED` (`0/1`) → enable file upload + parse via `sigmaris_core` (`/io/upload`, `/io/parse`)
-- `TOUHOU_LINK_ANALYSIS_ENABLED` (`0/1`) → enable link analysis via `sigmaris_core` (`/io/web/fetch`, `/io/web/search`, `/io/github/repos`)
+- `TOUHOU_UPLOAD_ENABLED` (`0/1`) → enable file upload + parse via `gensokyo-persona-core` (`/io/upload`, `/io/parse`)
+- `TOUHOU_LINK_ANALYSIS_ENABLED` (`0/1`) → enable link analysis via `gensokyo-persona-core` (`/io/web/fetch`, `/io/web/search`, `/io/github/repos`)
 - `TOUHOU_AUTO_BROWSE_ENABLED` (`0/1`) → enable auto browse (best-effort) when link analysis is disabled
 
 ## Run locally
@@ -91,12 +91,12 @@ Main (used by `/chat/session`):
 - `GET /api/session/[sessionId]/messages` (reload/restore; requires auth)
 - `POST /api/session/[sessionId]/message` (send a message; requires auth)
   - Content-Type: `multipart/form-data`
-  - Proxies to `sigmaris_core` (`/persona/chat` or `/persona/chat/stream`)
+  - Proxies to `gensokyo-persona-core` (`/persona/chat` or `/persona/chat/stream`)
   - Injects character persona via `persona_system` (built in `lib/touhouPersona.ts`)
 
 Other:
 
-- `GET /api/io/attachment/[attachmentId]` (proxy to `sigmaris_core` attachment download)
+- `GET /api/io/attachment/[attachmentId]` (proxy to `gensokyo-persona-core` attachment download)
 - `POST /api/chat` (legacy; used by older components in this repo)
 
 ## Desktop build (Windows, optional)
@@ -120,4 +120,4 @@ Touhou-related characters, names, and settings are the property of:
 
 This directory does not include a dedicated license file.
 
-Please follow the license policy of the repository and/or sibling packages (for example: `sigmaris-os/LICENSE`).
+Please follow the license policy of the repository and/or sibling packages.

@@ -10,17 +10,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps first for better layer caching
-COPY gensokyo-persona-core/requirements.txt /app/gensokyo-persona-core/requirements.txt
-RUN pip install --no-cache-dir -r /app/gensokyo-persona-core/requirements.txt
+# Install deps first for layer caching
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy app source
+# Copy gensokyo-persona-core only (this Dockerfile is built with context = gensokyo-persona-core)
 COPY . /app
 
 # Fly sets PORT; default to 8080 for local docker runs.
 ENV PORT=8080
-
-# Important: run from gensokyo-persona-core so `import persona_core` resolves to `gensokyo-persona-core/persona_core`
-WORKDIR /app/gensokyo-persona-core
 
 CMD ["sh", "-lc", "python -m uvicorn server:app --host 0.0.0.0 --port ${PORT}"]

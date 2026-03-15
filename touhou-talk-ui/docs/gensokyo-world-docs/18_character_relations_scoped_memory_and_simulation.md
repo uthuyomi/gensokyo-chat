@@ -39,7 +39,7 @@ SQL: `supabase/common_episodes_character_scoped.sql`
 UI (touhou-talk-ui / Next.js)
   - world/loc/char を読み、表示を組む
   - persona_system を組み立てる（Relation + world_hint を「材料」として注入）
-  - 会話生成は sigmaris_core に委譲
+  - 会話生成は gensokyo-persona-core に委譲
   - 世界更新は world-engine に委譲（Command / Visit / Emit）
 
 World Engine (gensokyo-world-engine / Python)
@@ -49,7 +49,7 @@ World Engine (gensokyo-world-engine / Python)
   - BT planner（user_say/world_tick をトリガに npc_action / npc_say / npc_dialogue を生成）
   - 自律tick（visitベース + 追加の軽量ルール）
 
-Persona / Memory (sigmaris_core / Python)
+Persona / Memory (gensokyo-persona-core / Python)
   - 会話生成
   - episodic memory（common_episodes）への保存/検索
   - (user_id, character_id) でスコープ
@@ -61,7 +61,7 @@ Persona / Memory (sigmaris_core / Python)
 
 ```mermaid
 flowchart LR
-  UI[touhou-talk-ui\nNext.js] -->|POST /persona/chat| CORE[sigmaris_core\nPersona + Memory]
+  UI[touhou-talk-ui\nNext.js] -->|POST /persona/chat| CORE[gensokyo-persona-core\nPersona + Memory]
   UI -->|POST /world/command| WE[gensokyo-world-engine\nWorld State + Planner]
   UI -->|POST /world/visit| WE
   WE -->|append event| SB[(Supabase\nworld_event_log)]
@@ -88,7 +88,7 @@ flowchart LR
 
 ---
 
-## 18.5 Character Scoped Memory（sigmaris_core）
+## 18.5 Character Scoped Memory（gensokyo-persona-core）
 
 実装ポイント：
 
@@ -154,10 +154,10 @@ flowchart LR
 - `supabase/player_character_relations.sql`
 - `supabase/common_episodes_character_scoped.sql`
 
-2) sigmaris_core 起動（例）：
+2) gensokyo-persona-core 起動（例）：
 
 ```powershell
-cd sigmaris_core
+cd gensokyo-persona-core
 python -m pip install -r requirements.txt
 python -m uvicorn server:app --reload --port 8000
 ```
@@ -182,4 +182,3 @@ npm run dev
 
 - `/chat/session?world=gensokyo_main&loc=hakurei_shrine&char=reimu`
 - World log に `world_tick` / `npc_dialogue` が流れる（WSゲートが起動している場合）
-

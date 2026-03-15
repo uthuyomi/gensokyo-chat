@@ -135,7 +135,7 @@ LLMは **副作用ゼロ** の関数として扱います。
 - `world_state` / `world_npc_state` / `world_user_state` を書き換える指示（たとえJSONで返ってきても無視）
 
 実装メモ（現状）：
-- LLMは `sigmaris_core` の `POST /persona/chat` を **台詞生成専用** として呼ぶ（SSEではない）
+- LLMは `gensokyo-persona-core` の `POST /persona/chat` を **台詞生成専用** として呼ぶ（SSEではない）
 - world-engineは **reply文字列だけ** を採用し、他の構造出力（JSON等）は無視する
 
 ---

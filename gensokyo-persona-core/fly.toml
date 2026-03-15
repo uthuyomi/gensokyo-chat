@@ -1,0 +1,28 @@
+# Fly.io app config for deploying **gensokyo-persona-core only**.
+#
+# Usage:
+#   cd gensokyo-persona-core
+#   fly deploy
+#
+# Note:
+# - This fly.toml intentionally lives under gensokyo-persona-core so the build context does not include other apps (touhou-talk-ui, etc.).
+
+app = "project-sigmaris"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_start_machines = true
+  auto_stop_machines = false
+  min_machines_running = 1
+  processes = ["app"]
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "1gb"
+  memory_mb = 1024
