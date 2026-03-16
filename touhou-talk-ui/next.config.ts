@@ -19,6 +19,18 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     NEXT_PUBLIC_SIGMARIS_CORE: process.env.NEXT_PUBLIC_SIGMARIS_CORE,
   },
+  // Vercel: avoid bundling large static assets into serverless functions via output file tracing.
+  // Static assets in `public/` are deployed separately and do not need to be part of function bundles.
+  // Without this, dynamic filesystem reads in some route handlers can cause `public/` to be traced in.
+  outputFileTracingExcludes: {
+    "*": [
+      "public/background/**",
+      "public/avatar/**",
+      "public/maps/**",
+      "public/top/**",
+      "public/entry/**",
+    ],
+  },
 };
 
 export default nextConfig;
