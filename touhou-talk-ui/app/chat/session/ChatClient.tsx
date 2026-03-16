@@ -140,6 +140,11 @@ export default function ChatClient() {
   const currentLayer = searchParams.get("layer");
   const currentLocationId = searchParams.get("loc");
 
+  const isElectron = useMemo(() => {
+    if (typeof navigator === "undefined") return false;
+    return String(navigator.userAgent ?? "").includes("Electron");
+  }, []);
+
   /* =========================
      State
   ========================= */
@@ -149,6 +154,50 @@ export default function ChatClient() {
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(
     null,
   );
+
+  const [desktopAvatarVisible, setDesktopAvatarVisible] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const v = String(window.localStorage.getItem("touhou.desktop.avatar.visible") ?? "").trim();
+    if (!v) return true;
+    return v !== "0" && v.toLowerCase() !== "false";
+  });
+
+  const [desktopAvatarLayout, setDesktopAvatarLayout] = useState<"pip" | "dock">(() => {
+    if (typeof window === "undefined") return "pip";
+    const v = String(window.localStorage.getItem("touhou.desktop.avatar.layout") ?? "").trim().toLowerCase();
+    return v === "dock" ? "dock" : "pip";
+  });
+
+  const [desktopAvatarDockWidth, setDesktopAvatarDockWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 360;
+    const raw = String(window.localStorage.getItem("touhou.desktop.avatar.dockWidth") ?? "").trim();
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return 360;
+    return Math.max(260, Math.min(640, Math.trunc(n)));
+  });
+
+  const [desktopAvatarPipRect, setDesktopAvatarPipRect] = useState<{
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  }>(() => {
+    if (typeof window === "undefined") return { x: 0, y: 0, w: 340, h: 420 };
+    const readNum = (k: string, fallback: number) => {
+      const raw = String(window.localStorage.getItem(k) ?? "").trim();
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : fallback;
+    };
+
+    const w = Math.max(260, Math.min(520, Math.trunc(readNum("touhou.desktop.avatar.pip.w", 340))));
+    const h = Math.max(260, Math.min(620, Math.trunc(readNum("touhou.desktop.avatar.pip.h", 420))));
+    const x = Math.trunc(readNum("touhou.desktop.avatar.pip.x", 0));
+    const y = Math.trunc(readNum("touhou.desktop.avatar.pip.y", 80));
+    return { x, y, w, h };
+  });
+
+  const [desktopAvatarAvailRev, setDesktopAvatarAvailRev] = useState(0);
+  const [desktopAvatarAvailable, setDesktopAvatarAvailable] = useState(false);
 
   const [artifactBusy, setArtifactBusy] = useState(false);
 
@@ -191,6 +240,192 @@ export default function ChatClient() {
   });
 
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("touhou.desktop.avatar.visible", desktopAvatarVisible ? "1" : "0");
+      window.localStorage.setItem("touhou.desktop.avatar.layout", desktopAvatarLayout);
+      window.localStorage.setItem("touhou.desktop.avatar.dockWidth", String(desktopAvatarDockWidth));
+      window.localStorage.setItem("touhou.desktop.avatar.pip.x", String(desktopAvatarPipRect.x));
+      window.localStorage.setItem("touhou.desktop.avatar.pip.y", String(desktopAvatarPipRect.y));
+      window.localStorage.setItem("touhou.desktop.avatar.pip.w", String(desktopAvatarPipRect.w));
+      window.localStorage.setItem("touhou.desktop.avatar.pip.h", String(desktopAvatarPipRect.h));
+    } catch {
+      // ignore
+    }
+  }, [desktopAvatarVisible, desktopAvatarLayout, desktopAvatarDockWidth, desktopAvatarPipRect]);
+
+  const dockWrapRef = useRef<HTMLDivElement | null>(null);
+  const dockDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  const pipWrapRef = useRef<HTMLDivElement | null>(null);
+  const pipDragRef = useRef<
+    | {
+        kind: "move";
+        pointerId: number;
+        startX: number;
+        startY: number;
+        startRect: { x: number; y: number; w: number; h: number };
+      }
+    | {
+        kind: "resize";
+        pointerId: number;
+        startX: number;
+        startY: number;
+        startRect: { x: number; y: number; w: number; h: number };
+      }
+    | null
+  >(null);
+
+  const clampPipRect = useCallback(
+    (rect: { x: number; y: number; w: number; h: number }) => {
+      const wrap = pipWrapRef.current;
+      const bounds = wrap?.getBoundingClientRect?.();
+      const bw = Math.trunc(bounds?.width ?? 0);
+      const bh = Math.trunc(bounds?.height ?? 0);
+
+      const minW = 260;
+      const minH = 260;
+      const maxW = 520;
+      const maxH = 620;
+
+      const w = Math.max(minW, Math.min(maxW, Math.trunc(rect.w)));
+      const h = Math.max(minH, Math.min(maxH, Math.trunc(rect.h)));
+
+      const pad = 8;
+      const maxX = bw > 0 ? Math.max(pad, bw - w - pad) : 10000;
+      const maxY = bh > 0 ? Math.max(pad, bh - h - pad) : 10000;
+
+      const x = Math.max(pad, Math.min(maxX, Math.trunc(rect.x)));
+      const y = Math.max(pad, Math.min(maxY, Math.trunc(rect.y)));
+
+      return { x, y, w, h };
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const drag = dockDragRef.current;
+      if (!drag) return;
+      if (e.pointerId !== drag.pointerId) return;
+      const wrap = dockWrapRef.current;
+      const wrapWidth = wrap?.getBoundingClientRect?.().width ?? 0;
+
+      // Right dock: dragging left increases width, dragging right decreases.
+      const next = Math.trunc(drag.startWidth + (drag.startX - e.clientX));
+
+      const min = 260;
+      const maxByWrap = wrapWidth > 0 ? Math.max(min, Math.trunc(wrapWidth - 420)) : 640; // keep chat usable
+      const max = Math.max(min, Math.min(640, maxByWrap));
+      setDesktopAvatarDockWidth(Math.max(min, Math.min(max, next)));
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const drag = dockDragRef.current;
+      if (!drag) return;
+      if (e.pointerId !== drag.pointerId) return;
+      dockDragRef.current = null;
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const drag = pipDragRef.current;
+      if (!drag) return;
+      if (e.pointerId !== drag.pointerId) return;
+
+      if (drag.kind === "move") {
+        const next = {
+          ...drag.startRect,
+          x: drag.startRect.x + (e.clientX - drag.startX),
+          y: drag.startRect.y + (e.clientY - drag.startY),
+        };
+        setDesktopAvatarPipRect(clampPipRect(next));
+        return;
+      }
+
+      // resize (bottom-right)
+      const next = {
+        ...drag.startRect,
+        w: drag.startRect.w + (e.clientX - drag.startX),
+        h: drag.startRect.h + (e.clientY - drag.startY),
+      };
+      setDesktopAvatarPipRect(clampPipRect(next));
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const drag = pipDragRef.current;
+      if (!drag) return;
+      if (e.pointerId !== drag.pointerId) return;
+      pipDragRef.current = null;
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [clampPipRect]);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    const onUpdated = (_ev: Event) => {
+      setDesktopAvatarAvailRev((n) => n + 1);
+    };
+    window.addEventListener("touhou-desktop:vrm-updated", onUpdated as EventListener);
+    return () => {
+      window.removeEventListener("touhou-desktop:vrm-updated", onUpdated as EventListener);
+    };
+  }, [isElectron]);
+
+  useEffect(() => {
+    if (!isElectron) {
+      setDesktopAvatarAvailable(false);
+      return;
+    }
+    if (!activeCharacterId) {
+      setDesktopAvatarAvailable(false);
+      return;
+    }
+
+    let canceled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/desktop/character-settings?char=${encodeURIComponent(activeCharacterId)}`, {
+          cache: "no-store",
+        });
+        const j = (await res.json().catch(() => null)) as
+          | { ok?: boolean; exists?: boolean; settings?: { vrm?: { enabled?: boolean; path?: string | null } } | null }
+          | null;
+        const ok = Boolean(res.ok && j?.ok && j.exists && j.settings?.vrm?.enabled && j.settings?.vrm?.path);
+        if (!canceled) setDesktopAvatarAvailable(ok);
+      } catch {
+        if (!canceled) setDesktopAvatarAvailable(false);
+      }
+    })();
+
+    return () => {
+      canceled = true;
+    };
+  }, [isElectron, activeCharacterId, desktopAvatarAvailRev]);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 1024px)");
@@ -1208,17 +1443,179 @@ export default function ChatClient() {
                </div>
 
                 <ThreadSearch activeSessionId={activeSessionId} />
+
+                {/* Desktop avatar controls (Electron only) */}
+                {isElectron && activeSessionId ? (
+                  <div className="ml-auto hidden items-center gap-2 lg:flex">
+                    <button
+                      type="button"
+                      className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
+                      disabled={!desktopAvatarAvailable}
+                      onClick={() => setDesktopAvatarVisible((v) => !v)}
+                      title="Toggle avatar visibility"
+                    >
+                      {desktopAvatarVisible ? "Avatar: On" : "Avatar: Off"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
+                      disabled={!desktopAvatarAvailable || !desktopAvatarVisible}
+                      onClick={() =>
+                        setDesktopAvatarLayout((v) => (v === "pip" ? "dock" : "pip"))
+                      }
+                      title="Switch avatar layout"
+                    >
+                      {desktopAvatarLayout === "pip" ? "Layout: PiP" : "Layout: Dock"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
+                      disabled={!desktopAvatarAvailable || !desktopAvatarVisible || !activeCharacterId}
+                      onClick={() => {
+                        if (!activeCharacterId) return;
+                        const url = `/desktop/avatar?char=${encodeURIComponent(activeCharacterId)}`;
+                        try {
+                          window.open(url, "touhou-avatar", "width=420,height=560");
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                      title="Open avatar window"
+                    >
+                      Pop out
+                    </button>
+                  </div>
+                ) : null}
               </header>
 
               {/* Chat */}
               <div className="relative z-10 min-h-0 flex-1 overflow-hidden">
                 {activeSessionId ? (
                   <>
-                    <Thread />
-                    <DesktopLiveAvatar
-                      characterId={activeCharacterId}
-                      className="pointer-events-auto absolute right-4 top-20 hidden h-[420px] w-[340px] overflow-hidden rounded-2xl border bg-background/30 shadow-xl backdrop-blur lg:block"
-                    />
+                    {isElectron && desktopAvatarVisible && desktopAvatarAvailable && desktopAvatarLayout === "dock" ? (
+                      <div ref={dockWrapRef} className="flex h-full min-h-0 w-full">
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                          <Thread />
+                        </div>
+                        <div
+                          className="hidden h-full w-2 shrink-0 cursor-col-resize bg-transparent lg:block"
+                          role="separator"
+                          aria-orientation="vertical"
+                          aria-label="Resize avatar panel"
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            dockDragRef.current = {
+                              pointerId: e.pointerId,
+                              startX: e.clientX,
+                              startWidth: desktopAvatarDockWidth,
+                            };
+                            try {
+                              (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                          onDoubleClick={() => setDesktopAvatarDockWidth(360)}
+                          title="Drag to resize (double-click to reset)"
+                        >
+                          <div className="mx-auto h-full w-px bg-border/60" />
+                        </div>
+                        <aside
+                          className="hidden h-full shrink-0 border-l border-border/60 bg-background/20 backdrop-blur lg:block"
+                          style={{ width: `${desktopAvatarDockWidth}px` }}
+                        >
+                          <DesktopLiveAvatar
+                            characterId={activeCharacterId}
+                            className="h-full w-full"
+                          />
+                        </aside>
+                      </div>
+                    ) : (
+                      <>
+                        <Thread />
+                        {isElectron && desktopAvatarVisible && desktopAvatarAvailable ? (
+                          <div ref={pipWrapRef} className="absolute inset-0 pointer-events-none">
+                            <div
+                              className="pointer-events-auto absolute hidden overflow-hidden rounded-2xl border bg-background/30 shadow-xl backdrop-blur lg:block"
+                              style={{
+                                left: `${desktopAvatarPipRect.x}px`,
+                                top: `${desktopAvatarPipRect.y}px`,
+                                width: `${desktopAvatarPipRect.w}px`,
+                                height: `${desktopAvatarPipRect.h}px`,
+                              }}
+                            >
+                              <div
+                                className="flex h-8 w-full items-center justify-between gap-2 border-b border-border/60 bg-background/40 px-2 text-xs text-foreground/80"
+                                onPointerDown={(e) => {
+                                  if (e.button !== 0) return;
+                                  pipDragRef.current = {
+                                    kind: "move",
+                                    pointerId: e.pointerId,
+                                    startX: e.clientX,
+                                    startY: e.clientY,
+                                    startRect: desktopAvatarPipRect,
+                                  };
+                                  try {
+                                    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+                                  } catch {
+                                    // ignore
+                                  }
+                                }}
+                                onDoubleClick={() => {
+                                  setDesktopAvatarPipRect((prev) =>
+                                    clampPipRect({
+                                      ...prev,
+                                      w: 340,
+                                      h: 420,
+                                    }),
+                                  );
+                                }}
+                                title="Drag to move (double-click to reset size)"
+                              >
+                                <div className="min-w-0 truncate">
+                                  {activeCharacter?.name ?? "Avatar"}
+                                </div>
+                                <button
+                                  type="button"
+                                  className="rounded-md px-1.5 py-0.5 text-foreground/70 hover:bg-background/50"
+                                  onClick={() => setDesktopAvatarVisible(false)}
+                                  title="Hide avatar"
+                                >
+                                  ×
+                                </button>
+                              </div>
+
+                              <DesktopLiveAvatar
+                                characterId={activeCharacterId}
+                                className="h-[calc(100%-2rem)] w-full"
+                              />
+
+                              <div
+                                className="absolute bottom-1 right-1 h-4 w-4 cursor-nwse-resize rounded-sm border border-border/60 bg-background/50"
+                                onPointerDown={(e) => {
+                                  if (e.button !== 0) return;
+                                  pipDragRef.current = {
+                                    kind: "resize",
+                                    pointerId: e.pointerId,
+                                    startX: e.clientX,
+                                    startY: e.clientY,
+                                    startRect: desktopAvatarPipRect,
+                                  };
+                                  try {
+                                    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+                                  } catch {
+                                    // ignore
+                                  }
+                                }}
+                                title="Drag to resize"
+                              />
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    )}
                   </>
                 ) : (
                   <div className="flex h-full items-center justify-center text-muted-foreground">
