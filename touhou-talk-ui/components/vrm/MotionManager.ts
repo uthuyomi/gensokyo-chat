@@ -59,6 +59,10 @@ export class MotionManager {
   private vrm: VRM;
   private t = 0;
 
+  // Facial expressions are fixed to default (neutral) by default.
+  // Lip-sync visemes are still applied when speaking.
+  private faceFixedToDefault = true;
+
   private bodyEnabled = true;
   private speaking = false;
   private emotion: EmotionName = "neutral";
@@ -96,6 +100,10 @@ export class MotionManager {
     this.vrm = vrm;
     // Start subtle idle gestures a little after spawn, not instantly.
     this.nextAutoGestureAtT = 8 + Math.random() * 8;
+  }
+
+  setFaceFixedToDefault(fixed: boolean) {
+    this.faceFixedToDefault = !!fixed;
   }
 
   setBodyEnabled(enabled: boolean) {
@@ -232,22 +240,22 @@ export class MotionManager {
       this.setExprTarget(k, 0);
     }
 
-    if (this.emotion === "happy") for (const k of happyKeys) this.setExprTarget(k, 0.9);
-    if (this.emotion === "angry") for (const k of angryKeys) this.setExprTarget(k, 0.75);
-    if (this.emotion === "sad") for (const k of sadKeys) this.setExprTarget(k, 0.75);
-    if (this.emotion === "thinking") {
-      // keep neutral face but blink a bit slower and keep mouth variation smaller (handled elsewhere)
+    if (!this.faceFixedToDefault) {
+      if (this.emotion === "happy") for (const k of happyKeys) this.setExprTarget(k, 0.9);
+      if (this.emotion === "angry") for (const k of angryKeys) this.setExprTarget(k, 0.75);
+      if (this.emotion === "sad") for (const k of sadKeys) this.setExprTarget(k, 0.75);
+      if (this.emotion === "thinking") {
+        // keep neutral face but blink a bit slower and keep mouth variation smaller (handled elsewhere)
+      }
+
+      // gesture-driven expression accents
+      if (this.gesture === "surprise") for (const k of surprisedKeys) this.setExprTarget(k, 0.85);
+      if (this.gesture === "laugh") for (const k of happyKeys) this.setExprTarget(k, 1.0);
+
+      // Blink (procedural)
+      const blinkVal = this.computeBlinkValue(dt);
+      for (const k of blinkKeys) this.setExprTarget(k, blinkVal);
     }
-
-    // gesture-driven expression accents
-    if (this.gesture === "surprise") for (const k of surprisedKeys) this.setExprTarget(k, 0.85);
-    if (this.gesture === "laugh") for (const k of happyKeys) this.setExprTarget(k, 1.0);
-
-    // thinking: keep neutral face but blink a bit slower and keep mouth closed.
-
-    // Blink (procedural)
-    const blinkVal = this.computeBlinkValue(dt);
-    for (const k of blinkKeys) this.setExprTarget(k, blinkVal);
 
     // Visemes (VRM1 typically provides aa/ih/ou/ee/oh)
     const vrm1Visemes = ["aa", "ih", "ou", "ee", "oh"];
