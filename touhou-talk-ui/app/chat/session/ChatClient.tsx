@@ -168,6 +168,14 @@ export default function ChatClient() {
     return v === "dock" ? "dock" : "pip";
   });
 
+  const [desktopAvatarDockWidth, setDesktopAvatarDockWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return 360;
+    const raw = String(window.localStorage.getItem("touhou.desktop.avatar.dockWidth") ?? "").trim();
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return 360;
+    return Math.max(260, Math.min(640, Math.trunc(n)));
+  });
+
   const [desktopAvatarAvailRev, setDesktopAvatarAvailRev] = useState(0);
   const [desktopAvatarAvailable, setDesktopAvatarAvailable] = useState(false);
 
@@ -218,10 +226,52 @@ export default function ChatClient() {
     try {
       window.localStorage.setItem("touhou.desktop.avatar.visible", desktopAvatarVisible ? "1" : "0");
       window.localStorage.setItem("touhou.desktop.avatar.layout", desktopAvatarLayout);
+      window.localStorage.setItem("touhou.desktop.avatar.dockWidth", String(desktopAvatarDockWidth));
     } catch {
       // ignore
     }
-  }, [desktopAvatarVisible, desktopAvatarLayout]);
+  }, [desktopAvatarVisible, desktopAvatarLayout, desktopAvatarDockWidth]);
+
+  const dockWrapRef = useRef<HTMLDivElement | null>(null);
+  const dockDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const drag = dockDragRef.current;
+      if (!drag) return;
+      if (e.pointerId !== drag.pointerId) return;
+      const wrap = dockWrapRef.current;
+      const wrapWidth = wrap?.getBoundingClientRect?.().width ?? 0;
+
+      // Right dock: dragging left increases width, dragging right decreases.
+      const next = Math.trunc(drag.startWidth + (drag.startX - e.clientX));
+
+      const min = 260;
+      const maxByWrap = wrapWidth > 0 ? Math.max(min, Math.trunc(wrapWidth - 420)) : 640; // keep chat usable
+      const max = Math.max(min, Math.min(640, maxByWrap));
+      setDesktopAvatarDockWidth(Math.max(min, Math.min(max, next)));
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const drag = dockDragRef.current;
+      if (!drag) return;
+      if (e.pointerId !== drag.pointerId) return;
+      dockDragRef.current = null;
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, []);
 
   useEffect(() => {
     if (!isElectron) return;
@@ -1333,11 +1383,37 @@ export default function ChatClient() {
                 {activeSessionId ? (
                   <>
                     {isElectron && desktopAvatarVisible && desktopAvatarAvailable && desktopAvatarLayout === "dock" ? (
-                      <div className="flex h-full min-h-0 w-full">
+                      <div ref={dockWrapRef} className="flex h-full min-h-0 w-full">
                         <div className="min-w-0 flex-1 overflow-hidden">
                           <Thread />
                         </div>
-                        <aside className="hidden h-full w-[360px] shrink-0 border-l border-border/60 bg-background/20 backdrop-blur lg:block">
+                        <div
+                          className="hidden h-full w-2 shrink-0 cursor-col-resize bg-transparent lg:block"
+                          role="separator"
+                          aria-orientation="vertical"
+                          aria-label="Resize avatar panel"
+                          onPointerDown={(e) => {
+                            if (e.button !== 0) return;
+                            dockDragRef.current = {
+                              pointerId: e.pointerId,
+                              startX: e.clientX,
+                              startWidth: desktopAvatarDockWidth,
+                            };
+                            try {
+                              (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                          onDoubleClick={() => setDesktopAvatarDockWidth(360)}
+                          title="Drag to resize (double-click to reset)"
+                        >
+                          <div className="mx-auto h-full w-px bg-border/60" />
+                        </div>
+                        <aside
+                          className="hidden h-full shrink-0 border-l border-border/60 bg-background/20 backdrop-blur lg:block"
+                          style={{ width: `${desktopAvatarDockWidth}px` }}
+                        >
                           <DesktopLiveAvatar
                             characterId={activeCharacterId}
                             className="h-full w-full"
