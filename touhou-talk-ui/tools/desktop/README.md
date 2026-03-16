@@ -4,7 +4,7 @@ This folder contains the Electron wrapper for `touhou-talk-ui`.
 
 Design goals:
 
-- Desktop mode is **local-only** (a shell around the UI)
+- Desktop mode is local-only (a shell around the UI)
 - Desktop runtime stores settings under Electron `userData`
 - A bundled `default.env` can ship safe defaults (and is treated as highest priority)
 
@@ -32,12 +32,12 @@ What `desktop:dev` does:
 
 On launch, Electron sets:
 
-- `TOUHOU_DESKTOP_USERDATA_DIR` to the app’s `userData` directory
+- `TOUHOU_DESKTOP_USERDATA_DIR` to the app's `userData` directory
 - `TOUHOU_DESKTOP_ENV_PATH` to the env file used by desktop runtime (`touhou-talk.env`)
 
 Typical dev userData dir:
 
-- `%LOCALAPPDATA%/TouhouTalkDesktopDev/` (or `%APPDATA%/…` depending on environment)
+- `%LOCALAPPDATA%/TouhouTalkDesktopDev/` (or `%APPDATA%/...` depending on environment)
 
 The env file is:
 
@@ -49,7 +49,7 @@ Packaged builds can include a bundled `default.env` at:
 
 - `touhou-talk-ui/tools/desktop/.bundle/default.env`
 
-Electron loads bundled defaults **first** and treats them as **highest priority**.
+Electron loads bundled defaults first and treats them as highest priority.
 The user env file is used only to fill missing values (and will not override defaults).
 
 Security note: service role keys are intentionally not loaded from bundled defaults.

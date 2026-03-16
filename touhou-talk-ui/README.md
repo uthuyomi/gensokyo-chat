@@ -3,7 +3,7 @@
 # Touhou Talk UI
 
 `touhou-talk-ui` is a Next.js UI in the Project Sigmaris monorepo.
-It is an **unofficial fan-made** (derivative) character chat UI inspired by Touhou Project, built to stress‑test the persona core with a product‑shaped UX.
+It is an unofficial fan-made (derivative) character chat UI inspired by Touhou Project, built to stress-test the persona core with a product-shaped UX.
 
 Core dependencies:
 
@@ -69,7 +69,7 @@ Desktop-only configuration endpoints:
 
 ## Desktop (Electron / Windows, optional)
 
-The desktop wrapper is “local-only”. It runs the UI in a local Electron shell and stores per‑character config (VRM / TTS / motions) on disk.
+The desktop wrapper is local-only. It runs the UI in an Electron shell and stores per-character config (VRM / TTS / motions) on disk.
 
 ### Dev
 
@@ -91,7 +91,7 @@ The dev runner can load a dedicated env file via:
 - `TOUHOU_DESKTOP_ENV_PATH` (explicit file path), or
 - `%LOCALAPPDATA%/TouhouTalkDesktopDev/touhou-talk.env` / `%APPDATA%/...` (auto location when not set)
 
-It is intended for **local dev only**. Do not put privileged keys there.
+It is intended for local dev only. Do not put privileged keys there.
 
 ### Packaged build
 
@@ -102,5 +102,6 @@ npm run desktop:dist
 
 ## Fan work notice
 
-This project is an **unofficial, non-commercial fan work** inspired by Touhou Project.
+This project is an unofficial, non-commercial fan work inspired by Touhou Project.
 It is not affiliated with or endorsed by the original creator or rights holders.
+

@@ -2,7 +2,7 @@
 
 # gensokyo-persona-core
 
-FastAPI backend that implements the “Persona OS” control plane used by UIs in this monorepo.
+FastAPI backend that implements the "Persona OS" control plane used by UIs in this monorepo.
 
 It exposes:
 
@@ -28,7 +28,7 @@ python -m venv .venv
 
 ### Configure env
 
-For local dev this repo typically uses the **repo root** `.env` (see `persona_core/storage/env_loader.py`).
+For local dev this repo typically uses the repo root `.env` (see `persona_core/storage/env_loader.py`).
 Start from `.env.example` at the repo root and set at least:
 
 - `OPENAI_API_KEY`
@@ -51,11 +51,11 @@ Swagger / OpenAPI: `http://127.0.0.1:8000/docs`
 
 The core supports two authentication paths:
 
-1) **Supabase JWT** (typical for the UI)
+1) Supabase JWT (typical for the UI)
    - Provide `Authorization: Bearer <access_token>`
    - The token is verified server-side (best-effort) via Supabase.
 
-2) **Internal token bypass** (local/dev service-to-service)
+2) Internal token bypass (local/dev service-to-service)
    - Set `SIGMARIS_INTERNAL_TOKEN`
    - Send header `X-Sigmaris-Internal-Token: <token>`
    - Requests are treated as `SIGMARIS_DEFAULT_USER_ID` (default: `default-user`)
@@ -72,11 +72,6 @@ curl -X POST "http://127.0.0.1:8000/persona/chat" \
   -d '{"user_id":"u_test_001","session_id":"s_test_001","message":"Hello. One sentence reply."}'
 ```
 
-Response is JSON (shape evolves) and includes:
-
-- `reply` (string)
-- `meta` (object; always non-null)
-
 ### `POST /persona/chat/stream` (SSE)
 
 ```bash
@@ -87,28 +82,28 @@ curl -N -X POST "http://127.0.0.1:8000/persona/chat/stream" \
 
 Notes:
 
-- If you deploy behind a reverse proxy, make sure **SSE buffering is disabled**.
+- If you deploy behind a reverse proxy, ensure SSE buffering is disabled.
 - UIs in this repo proxy this endpoint from Next.js route handlers.
 
 ## Web fetch / Web RAG (optional, Phase04)
 
-The core includes SSRF‑guarded web fetching and a bounded “web RAG” pipeline.
+The core includes SSRF-guarded web fetching and a bounded "web RAG" pipeline.
 
 ### Web fetch allowlist
 
 Fetching is blocked unless you explicitly allow it:
 
-- `SIGMARIS_WEB_FETCH_ALLOW_DOMAINS` — comma-separated domains (e.g. `wikipedia.org, nhk.or.jp`)
-- `SIGMARIS_WEB_FETCH_ALLOW_ALL=1` — development only
+- `SIGMARIS_WEB_FETCH_ALLOW_DOMAINS` - comma-separated domains (e.g. `wikipedia.org, nhk.or.jp`)
+- `SIGMARIS_WEB_FETCH_ALLOW_ALL=1` - development only
 
 ### Web RAG toggles
 
-- `SIGMARIS_WEB_RAG_ENABLED=1` — enable `/io/web/rag`
-- `SIGMARIS_WEB_RAG_AUTO=1` — optional auto-trigger (best-effort)
+- `SIGMARIS_WEB_RAG_ENABLED=1` - enable `/io/web/rag`
+- `SIGMARIS_WEB_RAG_AUTO=1` - optional auto-trigger (best-effort)
 
 Search providers (optional):
 
-- `SERPER_API_KEY` — Serper
+- `SERPER_API_KEY` - Serper
 
 ## Where to look in code (orientation)
 
@@ -117,3 +112,4 @@ Search providers (optional):
 - Memory + stores: `persona_core/memory/`, `persona_core/storage/`
 - Safety: `persona_core/safety/`
 - State machine: `persona_core/state/`
+

@@ -3,7 +3,7 @@
 This folder contains small Blender batch jobs used by `touhou-talk-ui` to:
 
 - Scan a VRM for bones + shape keys (morph targets)
-- Generate a simple “idle breathe” animation and export it as GLB
+- Generate a simple "idle breathe" animation and export it as GLB
 
 Jobs live under `touhou-talk-ui/tools/blender/jobs/` and are executed via `run.ps1`.
 
@@ -20,7 +20,7 @@ $env:BLENDER_EXE="C:\\Program Files\\Blender Foundation\\Blender 4.2\\blender.ex
 
 ## How to run
 
-`run.ps1` resolves input/output paths relative to the **repo root**.
+`run.ps1` resolves input/output paths relative to the repo root.
 
 ### 1) Scan a VRM
 
@@ -45,4 +45,5 @@ pwsh -File touhou-talk-ui/tools/blender/run.ps1 `
 Notes:
 
 - The current `idle` job is conservative and primarily intended as a baseline for Reimu-like VRMs.
-- VRM is a glTF-based format; these jobs use Blender’s glTF importer/exporter (no VRM addon dependency).
+- VRM is a glTF-based format; these jobs use Blender's glTF importer/exporter (no VRM addon dependency).
+
