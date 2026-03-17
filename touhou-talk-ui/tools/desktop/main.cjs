@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, shell } = require("electron");
 const { fork } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -304,11 +304,60 @@ function createWindow(url) {
     width: 1200,
     height: 800,
     backgroundColor: "#0b0b12",
+    autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+
+  const createAvatarWindow = (targetUrl) => {
+    const avatarWin = new BrowserWindow({
+      width: 420,
+      height: 560,
+      backgroundColor: "#0b0b12",
+      autoHideMenuBar: true,
+      frame: false, // no native title bar / window chrome
+      titleBarStyle: "hidden",
+      resizable: true,
+      minimizable: true,
+      maximizable: false,
+      fullscreenable: false,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    avatarWin.loadURL(targetUrl);
+  };
+
+  // Intercept window.open from the renderer and create a frameless avatar-only window.
+  win.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
+    try {
+      const base = new URL(url);
+      const u = new URL(targetUrl, base);
+
+      // External links -> open in default browser.
+      if (u.origin !== base.origin) {
+        try {
+          shell.openExternal(u.toString());
+        } catch {}
+        return { action: "deny" };
+      }
+
+      if (u.pathname === "/desktop/avatar") {
+        createAvatarWindow(u.toString());
+        return { action: "deny" };
+      }
+
+      // Default: allow same-origin windows as-is.
+      return { action: "allow" };
+    } catch {
+      return { action: "deny" };
+    }
+  });
+
   win.loadURL(url);
 }
 
