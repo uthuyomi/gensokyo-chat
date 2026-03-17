@@ -16,22 +16,14 @@ function isElectronUa(): boolean {
 }
 
 export default function AvatarClient() {
-  const sp = useSearchParams();
-  const char = String(sp.get("char") ?? "").trim() || null;
+  useSearchParams(); // keep Next.js route reactive; pop-out character is fixed below.
+  const char = "reimu";
   const enabled = useMemo(() => isElectronUa(), []);
 
   if (!enabled) {
     return (
       <div className="flex h-dvh w-full items-center justify-center text-sm text-muted-foreground">
         Desktop avatar window is only available in the Electron app.
-      </div>
-    );
-  }
-
-  if (!char) {
-    return (
-      <div className="flex h-dvh w-full items-center justify-center text-sm text-muted-foreground">
-        Missing character id.
       </div>
     );
   }
