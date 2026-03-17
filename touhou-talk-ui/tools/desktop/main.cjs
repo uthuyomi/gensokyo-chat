@@ -315,8 +315,30 @@ function createWindow(url) {
     win.setMenuBarVisibility(false);
   } catch {}
 
+  /** @type {import("electron").BrowserWindow | null} */
+  let avatarWin = null;
+
   const createAvatarWindow = (targetUrl) => {
-    const avatarWin = new BrowserWindow({
+    if (avatarWin && !avatarWin.isDestroyed()) {
+      try {
+        // Refresh URL if it changed (query params, etc.), otherwise just focus.
+        const current = String(avatarWin.webContents?.getURL?.() ?? "");
+        if (current !== String(targetUrl)) avatarWin.loadURL(targetUrl);
+      } catch {}
+
+      try {
+        if (avatarWin.isMinimized()) avatarWin.restore();
+      } catch {}
+      try {
+        avatarWin.show();
+      } catch {}
+      try {
+        avatarWin.focus();
+      } catch {}
+      return;
+    }
+
+    avatarWin = new BrowserWindow({
       width: 420,
       height: 560,
       backgroundColor: "#00000000",
@@ -339,6 +361,10 @@ function createWindow(url) {
         contextIsolation: true,
         nodeIntegration: false,
       },
+    });
+
+    avatarWin.on("closed", () => {
+      avatarWin = null;
     });
 
     try {
@@ -381,6 +407,16 @@ function createWindow(url) {
       }
 
       if (isAvatarRoute(u)) {
+        const action = String(u.searchParams.get("action") ?? "").trim().toLowerCase();
+        if (action === "close" || action === "hide") {
+          if (avatarWin && !avatarWin.isDestroyed()) {
+            try {
+              avatarWin.close();
+            } catch {}
+          }
+          return { action: "deny" };
+        }
+
         createAvatarWindow(u.toString());
         return { action: "deny" };
       }
