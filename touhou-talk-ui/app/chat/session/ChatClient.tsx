@@ -297,13 +297,6 @@ export default function ChatClient() {
     };
   }, [isElectron, POPOUT_HEARTBEAT_KEY]);
 
-  useEffect(() => {
-    if (!isElectron) return;
-    if (!desktopAvatarPopoutActive) return;
-    // Force-hide while popout is active (prevents accidental double-render).
-    setDesktopAvatarVisible(false);
-  }, [isElectron, desktopAvatarPopoutActive]);
-
   const dockWrapRef = useRef<HTMLDivElement | null>(null);
   const dockDragRef = useRef<{
     pointerId: number;
@@ -1538,8 +1531,17 @@ export default function ChatClient() {
                     <button
                       type="button"
                       className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
-                      disabled={!desktopAvatarAvailable || desktopAvatarPopoutActive}
-                      onClick={() => setDesktopAvatarVisible((v) => !v)}
+                      disabled={!desktopAvatarAvailable}
+                      onClick={() => {
+                        if (desktopAvatarVisible && desktopAvatarPopoutActive) {
+                          try {
+                            window.open("/desktop/avatar?action=close", "touhou-avatar");
+                          } catch {
+                            // ignore
+                          }
+                        }
+                        setDesktopAvatarVisible((v) => !v);
+                      }}
                       title={
                         desktopAvatarPopoutActive
                           ? "別ウィンドウでアバターを表示中のため、チャット内アバターは非表示になります"
@@ -1574,8 +1576,18 @@ export default function ChatClient() {
                     <button
                       type="button"
                       className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
-                      disabled={!desktopAvatarAvailable || !desktopAvatarVisible || !activeCharacterId}
+                      disabled={!desktopAvatarAvailable || !activeCharacterId}
                       onClick={() => {
+                        if (desktopAvatarPopoutActive) {
+                          try {
+                            window.open("/desktop/avatar?action=close", "touhou-avatar");
+                          } catch {
+                            // ignore
+                          }
+                          return;
+                        }
+
+                        setDesktopAvatarVisible(true);
                         // Pop-out is currently fixed to Reimu for desktop (per UX decision).
                         const url = `/desktop/avatar?char=reimu`;
                         try {
@@ -1584,9 +1596,13 @@ export default function ChatClient() {
                           // ignore
                         }
                       }}
-                      title="別ウィンドウでアバターを開きます"
+                      title={
+                        desktopAvatarPopoutActive
+                          ? "別ウィンドウ表示を閉じて、チャット内表示に戻します"
+                          : "別ウィンドウでアバターを開きます"
+                      }
                     >
-                      別ウィンドウで開く
+                      {desktopAvatarPopoutActive ? "チャット内に戻す" : "別ウィンドウで開く"}
                     </button>
                   </div>
                 ) : null}

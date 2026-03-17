@@ -407,6 +407,16 @@ function createWindow(url) {
       }
 
       if (isAvatarRoute(u)) {
+        const action = String(u.searchParams.get("action") ?? "").trim().toLowerCase();
+        if (action === "close" || action === "hide") {
+          if (avatarWin && !avatarWin.isDestroyed()) {
+            try {
+              avatarWin.close();
+            } catch {}
+          }
+          return { action: "deny" };
+        }
+
         createAvatarWindow(u.toString());
         return { action: "deny" };
       }
