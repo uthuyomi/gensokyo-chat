@@ -321,12 +321,15 @@ function createWindow(url) {
       // Windows: remove the resizable frame border that can remain even with frame:false.
       thickFrame: false,
       titleBarStyle: "hidden",
-      resizable: true,
-      minimizable: true,
+      // For true "cutout overlay" (no 1px border), disable OS resize frame.
+      resizable: false,
+      minimizable: false,
       maximizable: false,
       fullscreenable: false,
       transparent: true,
       hasShadow: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
       show: false,
       webPreferences: {
         contextIsolation: true,
