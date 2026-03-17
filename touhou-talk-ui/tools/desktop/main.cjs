@@ -318,6 +318,8 @@ function createWindow(url) {
       backgroundColor: "#00000000",
       autoHideMenuBar: true,
       frame: false, // no native title bar / window chrome
+      // Windows: remove the resizable frame border that can remain even with frame:false.
+      thickFrame: false,
       titleBarStyle: "hidden",
       resizable: true,
       minimizable: true,
