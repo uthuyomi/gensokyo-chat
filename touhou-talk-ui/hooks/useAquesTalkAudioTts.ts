@@ -22,6 +22,7 @@ function clamp01(x: number) {
 type VisemeWeights = { wAa: number; wIh: number; wOu: number; wEe: number; wOh: number };
 type Viseme = "aa" | "ih" | "ou" | "ee" | "oh";
 type VisemeSegment = { t0Sec: number; t1Sec: number; v: Viseme };
+type Envelope = { hopSec: number; values: Float32Array };
 
 export type TtsPlaybackInfo = {
   mode: "webaudio" | "htmlaudio" | "none";
@@ -48,6 +49,7 @@ export function useAquesTalkAudioTts() {
 
   const vowelTokensRef = useRef<Viseme[]>([]);
   const segmentsRef = useRef<VisemeSegment[] | null>(null);
+  const envelopeRef = useRef<Envelope | null>(null);
   const playStartCtxTimeRef = useRef<number | null>(null);
   const playDurationRef = useRef<number>(0);
   const playModeRef = useRef<"webaudio" | "htmlaudio" | "none">("none");
@@ -97,6 +99,53 @@ export function useAquesTalkAudioTts() {
     rafRef.current = null;
   }, []);
 
+  function computeEnvelope(audioBuf: AudioBuffer): Envelope | null {
+    try {
+      const sr = audioBuf.sampleRate || 48000;
+      const ch0 = audioBuf.getChannelData(0);
+      if (!ch0 || ch0.length < 128) return null;
+
+      const hop = Math.max(256, Math.floor(sr * 0.01)); // ~10ms
+      const n = Math.max(1, Math.floor(ch0.length / hop));
+      const values = new Float32Array(n);
+
+      // Mirror the realtime RMS->norm mapping used in startLevelRaf.
+      let maxRms = 0;
+      const tmpRms = new Float32Array(n);
+      for (let fi = 0; fi < n; fi += 1) {
+        const off = fi * hop;
+        let sum = 0;
+        const end = Math.min(ch0.length, off + hop);
+        const len = Math.max(1, end - off);
+        for (let i = off; i < end; i += 1) {
+          const v = ch0[i] ?? 0;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / len);
+        tmpRms[fi] = rms;
+        if (rms > maxRms) maxRms = rms;
+      }
+
+      // Light smoothing (keeps sync but reduces jitter).
+      for (let i = 1; i < tmpRms.length - 1; i += 1) {
+        tmpRms[i] = (tmpRms[i - 1]! + tmpRms[i]! + tmpRms[i + 1]!) / 3;
+      }
+
+      for (let fi = 0; fi < n; fi += 1) {
+        const rms = tmpRms[fi] ?? 0;
+        const norm = clamp01((rms - 0.008) / 0.09);
+        values[fi] = norm;
+      }
+
+      // If everything is basically silent, don't use envelope mode.
+      if (maxRms <= 1e-6) return null;
+
+      return { hopSec: hop / sr, values };
+    } catch {
+      return null;
+    }
+  }
+
   const startLevelRaf = useCallback(() => {
     const analyser = analyserRef.current;
     if (!analyser) return;
@@ -144,6 +193,7 @@ export function useAquesTalkAudioTts() {
     playDurationRef.current = 0;
     vowelTokensRef.current = [];
     segmentsRef.current = null;
+    envelopeRef.current = null;
     levelRef.current = 0;
     setSpeaking(false);
     stopLevelRaf();
@@ -577,6 +627,7 @@ export function useAquesTalkAudioTts() {
           levelRef.current = 0;
           vowelTokensRef.current = [];
           segmentsRef.current = null;
+          envelopeRef.current = null;
           stopLevelRaf();
           cleanupUrl();
         };
@@ -607,6 +658,14 @@ export function useAquesTalkAudioTts() {
         }
       }
 
+      // Build a per-frame amplitude envelope from the decoded audio so mouth open can follow
+      // the exact playback time `t` (avoids analyser smoothing lag).
+      try {
+        envelopeRef.current = computeEnvelope(audioBuf);
+      } catch {
+        envelopeRef.current = null;
+      }
+
       const src = ctx.createBufferSource();
       src.buffer = audioBuf;
       src.connect(analyser);
@@ -621,13 +680,15 @@ export function useAquesTalkAudioTts() {
         playDurationRef.current = 0;
         vowelTokensRef.current = [];
         segmentsRef.current = null;
+        envelopeRef.current = null;
         levelRef.current = 0;
         setSpeaking(false);
         stopLevelRaf();
       };
 
       srcRef.current = src;
-      startLevelRaf();
+      // If we have an envelope, we don't need analyser-driven level tracking for sync.
+      if (!envelopeRef.current) startLevelRaf();
       setSpeaking(true);
 
       try {
@@ -673,9 +734,10 @@ export function useAquesTalkAudioTts() {
   }, []);
 
   const getLipSyncFrame = useCallback((): { level: number; weights: null | VisemeWeights } => {
-    const level = levelRef.current;
+    let level = levelRef.current;
     const tokens = vowelTokensRef.current;
     const segs = segmentsRef.current;
+    const env = envelopeRef.current;
 
     const ctx = audioCtxRef.current;
     const start = playStartCtxTimeRef.current;
@@ -700,10 +762,21 @@ export function useAquesTalkAudioTts() {
       return { level, weights: null };
     }
 
+    // Small lead makes animation feel more "snappy" and compensates render latency.
+    const tLeadSec = 0.04;
+    const tAdj = Math.max(0, Math.min(dur, t + tLeadSec));
+
+    if (env && playModeRef.current === "webaudio" && env.values.length > 0) {
+      const i = Math.max(0, Math.min(env.values.length - 1, Math.floor(tAdj / env.hopSec)));
+      const v = env.values[i] ?? 0;
+      level = v;
+      levelRef.current = v;
+    }
+
     if (segs && segs.length) {
       // Time-aligned viseme timeline (preferred when available).
       let idx = 0;
-      while (idx < segs.length && t > segs[idx]!.t1Sec) idx += 1;
+      while (idx < segs.length && tAdj > segs[idx]!.t1Sec) idx += 1;
       if (idx >= segs.length) idx = segs.length - 1;
       if (idx < 0) idx = 0;
 
@@ -718,12 +791,12 @@ export function useAquesTalkAudioTts() {
       let wNext = 0;
 
       if (prevSeg) {
-        const a = clamp01(1 - (t - curSeg.t0Sec) / xfade);
+        const a = clamp01(1 - (tAdj - curSeg.t0Sec) / xfade);
         wPrev = a;
         wCur *= 1 - a;
       }
       if (nextSeg) {
-        const a = clamp01(1 - (curSeg.t1Sec - t) / xfade);
+        const a = clamp01(1 - (curSeg.t1Sec - tAdj) / xfade);
         wNext = a;
         wCur *= 1 - a;
       }
