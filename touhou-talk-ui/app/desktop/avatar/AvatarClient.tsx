@@ -58,7 +58,12 @@ export default function AvatarClient() {
   const runtime = useExternalStoreRuntime(store);
 
   return (
-    <div className="h-dvh w-full bg-background">
+    <div className="relative h-dvh w-full overflow-hidden bg-background">
+      {/* Frameless window: provide a small drag region (no visible panel). */}
+      <div
+        className="absolute inset-x-0 top-0 h-8"
+        style={{ WebkitAppRegion: "drag" } as any}
+      />
       <AssistantRuntimeProvider runtime={runtime}>
         <DesktopLiveAvatar characterId={char} className="h-full w-full" />
       </AssistantRuntimeProvider>
