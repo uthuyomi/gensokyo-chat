@@ -1478,8 +1478,8 @@ export default function ChatClient() {
                       className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
                       disabled={!desktopAvatarAvailable || !desktopAvatarVisible || !activeCharacterId}
                       onClick={() => {
-                        if (!activeCharacterId) return;
-                        const url = `/desktop/avatar?char=${encodeURIComponent(activeCharacterId)}`;
+                        // Pop-out is currently fixed to Reimu for desktop (per UX decision).
+                        const url = `/desktop/avatar?char=reimu`;
                         try {
                           window.open(url, "touhou-avatar", "width=420,height=560");
                         } catch {
