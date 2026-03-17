@@ -145,6 +145,8 @@ export default function ChatClient() {
     return String(navigator.userAgent ?? "").includes("Electron");
   }, []);
 
+  const POPOUT_HEARTBEAT_KEY = "touhou.desktop.avatar.popout.heartbeatUntil";
+
   /* =========================
      State
   ========================= */
@@ -198,6 +200,7 @@ export default function ChatClient() {
 
   const [desktopAvatarAvailRev, setDesktopAvatarAvailRev] = useState(0);
   const [desktopAvatarAvailable, setDesktopAvatarAvailable] = useState(false);
+  const [desktopAvatarPopoutActive, setDesktopAvatarPopoutActive] = useState(false);
 
   const [artifactBusy, setArtifactBusy] = useState(false);
 
@@ -255,6 +258,51 @@ export default function ChatClient() {
       // ignore
     }
   }, [desktopAvatarVisible, desktopAvatarLayout, desktopAvatarDockWidth, desktopAvatarPipRect]);
+
+  // If a dedicated avatar popout window is active, hide the in-chat avatar to avoid showing two VRMs.
+  useEffect(() => {
+    if (!isElectron) return;
+    if (typeof window === "undefined") return;
+
+    const read = () => {
+      try {
+        const raw = String(window.localStorage.getItem(POPOUT_HEARTBEAT_KEY) ?? "").trim();
+        const until = Number(raw);
+        const ok = Number.isFinite(until) && until > Date.now();
+        setDesktopAvatarPopoutActive(ok);
+      } catch {
+        setDesktopAvatarPopoutActive(false);
+      }
+    };
+
+    read();
+    const id = window.setInterval(read, 1000);
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== POPOUT_HEARTBEAT_KEY) return;
+      read();
+    };
+    try {
+      window.addEventListener("storage", onStorage);
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      window.clearInterval(id);
+      try {
+        window.removeEventListener("storage", onStorage);
+      } catch {
+        // ignore
+      }
+    };
+  }, [isElectron, POPOUT_HEARTBEAT_KEY]);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    if (!desktopAvatarPopoutActive) return;
+    // Force-hide while popout is active (prevents accidental double-render).
+    setDesktopAvatarVisible(false);
+  }, [isElectron, desktopAvatarPopoutActive]);
 
   const dockWrapRef = useRef<HTMLDivElement | null>(null);
   const dockDragRef = useRef<{
@@ -1490,17 +1538,27 @@ export default function ChatClient() {
                     <button
                       type="button"
                       className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
-                      disabled={!desktopAvatarAvailable}
+                      disabled={!desktopAvatarAvailable || desktopAvatarPopoutActive}
                       onClick={() => setDesktopAvatarVisible((v) => !v)}
-                      title={desktopAvatarVisible ? "アバターを非表示にします" : "アバターを表示します"}
+                      title={
+                        desktopAvatarPopoutActive
+                          ? "別ウィンドウでアバターを表示中のため、チャット内アバターは非表示になります"
+                          : desktopAvatarVisible
+                            ? "アバターを非表示にします"
+                            : "アバターを表示します"
+                      }
                     >
-                      {desktopAvatarVisible ? "アバターを隠す" : "アバターを表示"}
+                      {desktopAvatarPopoutActive
+                        ? "別ウィンドウ表示中"
+                        : desktopAvatarVisible
+                          ? "アバターを隠す"
+                          : "アバターを表示"}
                     </button>
 
                     <button
                       type="button"
                       className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
-                      disabled={!desktopAvatarAvailable || !desktopAvatarVisible}
+                      disabled={!desktopAvatarAvailable || !desktopAvatarVisible || desktopAvatarPopoutActive}
                       onClick={() =>
                         setDesktopAvatarLayout((v) => (v === "pip" ? "dock" : "pip"))
                       }
@@ -1538,7 +1596,11 @@ export default function ChatClient() {
               <div className="relative z-10 min-h-0 flex-1 overflow-hidden">
                 {activeSessionId ? (
                   <>
-                    {isElectron && desktopAvatarVisible && desktopAvatarAvailable && desktopAvatarLayout === "dock" ? (
+                    {isElectron &&
+                    desktopAvatarVisible &&
+                    desktopAvatarAvailable &&
+                    !desktopAvatarPopoutActive &&
+                    desktopAvatarLayout === "dock" ? (
                       <div ref={dockWrapRef} className="flex h-full min-h-0 w-full">
                         <div className="min-w-0 flex-1 overflow-hidden">
                           <Thread />
@@ -1579,7 +1641,10 @@ export default function ChatClient() {
                     ) : (
                       <>
                         <Thread />
-                        {isElectron && desktopAvatarVisible && desktopAvatarAvailable ? (
+                        {isElectron &&
+                        desktopAvatarVisible &&
+                        desktopAvatarAvailable &&
+                        !desktopAvatarPopoutActive ? (
                           <div ref={pipWrapRef} className="absolute inset-0 pointer-events-none">
                             <div
                               className="pointer-events-auto absolute hidden overflow-hidden rounded-2xl border bg-background/30 shadow-xl backdrop-blur lg:block"
