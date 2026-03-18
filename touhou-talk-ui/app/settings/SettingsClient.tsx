@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import DevCoreToggle from "@/components/dev/DevCoreToggle";
 import {
   applyThemeClass,
   getDefaultChatMode,
@@ -286,6 +287,8 @@ export default function SettingsClient() {
       </div>
 
       <Separator />
+
+      <DevCoreToggle />
 
       <section className="rounded-2xl border bg-card/60 p-5">
         <h2 className="font-medium">起動</h2>

@@ -99,6 +99,34 @@ function coreBaseUrl() {
   return String(raw).replace(/\/+$/, "");
 }
 
+function localCoreBaseUrl() {
+  const raw = process.env.SIGMARIS_CORE_URL_LOCAL || "http://127.0.0.1:8000";
+  return String(raw).replace(/\/+$/, "");
+}
+
+async function isDevCoreToggleAllowed(supabase: Awaited<ReturnType<typeof supabaseServer>>): Promise<boolean> {
+  try {
+    const { data } = await supabase.auth.getUser();
+    const email = String(data.user?.email ?? "").trim().toLowerCase();
+    return email === "kaiseif4e@gmail.com";
+  } catch {
+    return false;
+  }
+}
+
+async function resolveCoreBaseUrl(params: {
+  supabase: Awaited<ReturnType<typeof supabaseServer>>;
+  requestedMode: string | null;
+}): Promise<string> {
+  const requested = String(params.requestedMode ?? "").trim().toLowerCase();
+  if (requested !== "local" && requested !== "fly") return coreBaseUrl();
+
+  const allowed = await isDevCoreToggleAllowed(params.supabase);
+  if (!allowed) return coreBaseUrl();
+
+  return requested === "local" ? localCoreBaseUrl() : coreBaseUrl();
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -1592,6 +1620,7 @@ export async function POST(
   const formData = await req.formData();
   const characterId = formData.get("characterId");
   const text = formData.get("text");
+  const coreModeRaw = formData.get("coreMode");
   if (
     typeof characterId !== "string" ||
     typeof text !== "string" ||
@@ -1625,7 +1654,10 @@ export async function POST(
   }
 
   const coreHistory = await loadCoreHistory({ supabase, sessionId, userId, limit: 16 });
-  const base = coreBaseUrl();
+  const base = await resolveCoreBaseUrl({
+    supabase,
+    requestedMode: typeof coreModeRaw === "string" ? coreModeRaw : null,
+  });
 
   const chatModeRaw =
     conv && typeof (conv as Record<string, unknown>).chat_mode === "string"
