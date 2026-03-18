@@ -26,7 +26,8 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => ({}))) as ResetRequest;
     const characterId = String(body.characterId ?? "").trim();
-    const scopeKey = String(body.scopeKey ?? "global").trim() || "global";
+    const scopeKeyRaw = String(body.scopeKey ?? "").trim();
+    const scopeKey = scopeKeyRaw || (characterId ? `char:${characterId}` : "");
     const resetRelationships = body.resetRelationships !== false;
     const resetMemory = body.resetMemory !== false;
 
@@ -65,28 +66,42 @@ export async function POST(req: NextRequest) {
     }
 
     if (resetMemory) {
-      const prev = await supabase
-        .from("touhou_user_memory")
-        .select("rev")
-        .eq("user_id", userId)
-        .eq("scope_key", scopeKey)
-        .maybeSingle();
-      const prevRev = clampNum((prev.data as any)?.rev ?? 0, 0, Number.MAX_SAFE_INTEGER, 0);
+      if (scopeKey) {
+        const prev = await supabase
+          .from("touhou_user_memory")
+          .select("rev")
+          .eq("user_id", userId)
+          .eq("scope_key", scopeKey)
+          .maybeSingle();
+        const prevRev = clampNum((prev.data as any)?.rev ?? 0, 0, Number.MAX_SAFE_INTEGER, 0);
 
-      const { error } = await supabase.from("touhou_user_memory").upsert(
-        {
-          user_id: userId,
-          scope_key: scopeKey,
-          topics: [],
-          emotions: [],
-          recurring_issues: [],
-          traits: [],
-          rev: prevRev + 1,
-          updated_at: nowIso,
-        } as any,
-        { onConflict: "user_id,scope_key" },
-      );
-      if (error) return NextResponse.json({ error: "reset_memory_failed", detail: error }, { status: 500 });
+        const { error } = await supabase.from("touhou_user_memory").upsert(
+          {
+            user_id: userId,
+            scope_key: scopeKey,
+            topics: [],
+            emotions: [],
+            recurring_issues: [],
+            traits: [],
+            rev: prevRev + 1,
+            updated_at: nowIso,
+          } as any,
+          { onConflict: "user_id,scope_key" },
+        );
+        if (error) return NextResponse.json({ error: "reset_memory_failed", detail: error }, { status: 500 });
+      } else {
+        const { error } = await supabase
+          .from("touhou_user_memory")
+          .update({
+            topics: [],
+            emotions: [],
+            recurring_issues: [],
+            traits: [],
+            updated_at: nowIso,
+          } as any)
+          .eq("user_id", userId);
+        if (error) return NextResponse.json({ error: "reset_memories_failed", detail: error }, { status: 500 });
+      }
     }
 
     return NextResponse.json({ ok: true });
@@ -94,4 +109,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized", detail: String(e ?? "") }, { status: 401 });
   }
 }
-

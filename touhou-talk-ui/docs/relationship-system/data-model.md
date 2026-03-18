@@ -29,7 +29,7 @@
 主なカラム:
 
 - `user_id` (uuid / text)
-- `scope_key` (text): 現状 `global`
+- `scope_key` (text): **キャラ別**（例: `char:reimu`）
 - `topics` (jsonb text[]): 話題（例: `["仕事"]`）
 - `emotions` (jsonb text[]): 感情ラベル（例: `["不安"]`）
 - `recurring_issues` (jsonb text[]): 繰り返しの悩み（例: `["仕事ストレス"]`）
@@ -42,8 +42,12 @@
 - `user_id + scope_key` で一意（upsert前提）
 - RLS: `auth.uid() = user_id` のみ読み書き可能（ユーザー単位の隔離）
 
+補足:
+
+- 本プロジェクトでは **global共通Memoryは使用しません**。
+- Memoryは常に `scope_key=char:<characterId>` で保存・参照されます（例: `char:reimu`）。
+
 ## 3. Raw Logs（会話ログ）
 
 Raw messages は既存テーブル（例: `common_messages`）に保存し、Relationship/Memory は **抽出済みの意味情報のみ**を保存します。
 プロンプトへは「Raw全部投げ」を避け、ノイズとコストを抑えます。
-

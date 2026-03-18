@@ -6,7 +6,8 @@
 -- Goals:
 -- - Persist per-user, per-character relationship state (trust/familiarity) across web/desktop.
 -- - Persist per-user extracted "memory" profile (topics/emotions/recurring issues/traits).
--- - Keep forward-compatibility for future B expansion via `scope_key` (A uses "global").
+-- - Keep forward-compatibility for future B expansion via `scope_key`.
+--   NOTE: This project uses character-scoped memory only: scope_key like `char:reimu` (no global memory).
 
 create extension if not exists pgcrypto;
 

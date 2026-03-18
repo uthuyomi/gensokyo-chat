@@ -14,7 +14,7 @@
   "session_id": "…",
   "character_id": "reimu",
   "chat_mode": "casual",
-  "scope_key": "global",
+  "scope_key": "char:reimu",
   "user_message": "また仕事辞めたい",
   "assistant_message": "…",
   "relationship": { "trust": 0.2, "familiarity": 0.4 }
@@ -28,7 +28,7 @@
   "delta": { "trust": -1, "familiarity": 1 },
   "confidence": 0.72,
   "reasons": ["弱音の繰り返し", "相談への応答が成立"],
-  "scopeHints": ["global"],
+  "scopeHints": ["char:reimu"],
   "memory": {
     "topics_add": ["仕事"],
     "emotions_add": ["不安"],
@@ -51,4 +51,3 @@
 
 - **JSONのバリデーション失敗**は「スコア無し（更新無し）」として扱います。
 - `confidence` が閾値未満の場合は **Δ=0**（更新しない）扱いにします。
-

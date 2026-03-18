@@ -81,7 +81,7 @@ export default function RelationshipSettingsClient() {
     setError(null);
     setInfo(null);
     try {
-      const r = await fetch("/api/relationship", { cache: "no-store" });
+      const r = await fetch(`/api/relationship?characterId=${encodeURIComponent(selectedChar)}`, { cache: "no-store" });
       const j = (await r.json().catch(() => null)) as any;
       if (!r.ok) throw new Error(j?.error || "fetch failed");
       setRelationships(Array.isArray(j?.relationships) ? (j.relationships as RelationshipRow[]) : []);
@@ -95,7 +95,7 @@ export default function RelationshipSettingsClient() {
 
   useEffect(() => {
     void fetchAll();
-  }, []);
+  }, [selectedChar]);
 
   const activeRel = useMemo(() => {
     const row = relationships.find((r) => r.characterId === selectedChar) ?? null;
@@ -116,8 +116,8 @@ export default function RelationshipSettingsClient() {
       const body =
         kind === "all"
           ? { resetRelationships: true, resetMemory: true }
-          : kind === "memory"
-            ? { resetRelationships: false, resetMemory: true }
+        : kind === "memory"
+            ? { characterId: selectedChar, resetRelationships: false, resetMemory: true }
             : { characterId: selectedChar, resetRelationships: true, resetMemory: false };
 
       const r = await fetch("/api/relationship/reset", {
@@ -314,4 +314,3 @@ export default function RelationshipSettingsClient() {
     </div>
   );
 }
-
