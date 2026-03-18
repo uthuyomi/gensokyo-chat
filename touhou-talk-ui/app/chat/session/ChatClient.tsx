@@ -1181,6 +1181,17 @@ export default function ChatClient() {
         form.append("characterId", activeCharacterId);
         form.append("text", text);
 
+        try {
+          const coreMode = String(window.localStorage.getItem("touhou.dev.coreMode") ?? "")
+            .trim()
+            .toLowerCase();
+          if (coreMode === "local" || coreMode === "fly") {
+            form.append("coreMode", coreMode);
+          }
+        } catch {
+          // ignore
+        }
+
         for (const file of files) {
           form.append("files", file);
         }
