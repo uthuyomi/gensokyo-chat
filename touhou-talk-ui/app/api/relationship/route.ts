@@ -23,7 +23,8 @@ export async function GET(req: NextRequest) {
 
     const url = new URL(req.url);
     const characterId = (url.searchParams.get("characterId") || "").trim();
-    const scopeKey = (url.searchParams.get("scopeKey") || "global").trim() || "global";
+    const scopeKeyRaw = (url.searchParams.get("scopeKey") || "").trim();
+    const scopeKey = scopeKeyRaw || (characterId ? `char:${characterId}` : "");
 
     const relQuery = supabase
       .from("player_character_relations")
@@ -59,31 +60,33 @@ export async function GET(req: NextRequest) {
           }))
         : [];
 
-    const memRes = await supabase
-      .from("touhou_user_memory")
-      .select("scope_key, topics, emotions, recurring_issues, traits, updated_at")
-      .eq("user_id", userId)
-      .eq("scope_key", scopeKey)
-      .maybeSingle();
+    let memory: any = null;
+    if (scopeKey) {
+      const memRes = await supabase
+        .from("touhou_user_memory")
+        .select("scope_key, topics, emotions, recurring_issues, traits, updated_at")
+        .eq("user_id", userId)
+        .eq("scope_key", scopeKey)
+        .maybeSingle();
 
-    const memory = memRes.error
-      ? null
-      : memRes.data
-        ? {
-            scopeKey: String((memRes.data as any).scope_key ?? scopeKey),
-            topics: isStringArray((memRes.data as any).topics) ? ((memRes.data as any).topics as string[]) : [],
-            emotions: isStringArray((memRes.data as any).emotions) ? ((memRes.data as any).emotions as string[]) : [],
-            recurringIssues: isStringArray((memRes.data as any).recurring_issues)
-              ? ((memRes.data as any).recurring_issues as string[])
-              : [],
-            traits: isStringArray((memRes.data as any).traits) ? ((memRes.data as any).traits as string[]) : [],
-            updatedAt: (memRes.data as any).updated_at ? String((memRes.data as any).updated_at) : null,
-          }
-        : null;
+      memory = memRes.error
+        ? null
+        : memRes.data
+          ? {
+              scopeKey: String((memRes.data as any).scope_key ?? scopeKey),
+              topics: isStringArray((memRes.data as any).topics) ? ((memRes.data as any).topics as string[]) : [],
+              emotions: isStringArray((memRes.data as any).emotions) ? ((memRes.data as any).emotions as string[]) : [],
+              recurringIssues: isStringArray((memRes.data as any).recurring_issues)
+                ? ((memRes.data as any).recurring_issues as string[])
+                : [],
+              traits: isStringArray((memRes.data as any).traits) ? ((memRes.data as any).traits as string[]) : [],
+              updatedAt: (memRes.data as any).updated_at ? String((memRes.data as any).updated_at) : null,
+            }
+          : null;
+    }
 
     return NextResponse.json({ relationships, memory });
   } catch (e) {
     return NextResponse.json({ error: "unauthorized", detail: String(e ?? "") }, { status: 401 });
   }
 }
-

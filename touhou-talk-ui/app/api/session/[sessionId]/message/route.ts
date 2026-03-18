@@ -130,6 +130,7 @@ async function loadRelationshipAndMemoryBestEffort(params: {
 }): Promise<{ relationship: RelationshipState; memory: UserMemoryState | null }> {
   let trust = 0;
   let familiarity = 0;
+  const memScopeKey = `char:${params.characterId}`;
 
   try {
     const { data } = await params.supabase
@@ -153,7 +154,7 @@ async function loadRelationshipAndMemoryBestEffort(params: {
       .from("touhou_user_memory")
       .select("topics,emotions,recurring_issues,traits")
       .eq("user_id", params.userId)
-      .eq("scope_key", "global")
+      .eq("scope_key", memScopeKey)
       .maybeSingle();
 
     const topics = Array.isArray((data as any)?.topics) ? ((data as any).topics as string[]) : [];
@@ -327,6 +328,7 @@ async function scoreRelationshipTurn(params: {
   currentRelationship: { trust: number; familiarity: number };
 }): Promise<RelationshipScoreResponse | null> {
   const url = `${params.base}/persona/relationship/score`;
+  const scopeKey = `char:${params.characterId}`;
   try {
     const r = await fetch(url, {
       method: "POST",
@@ -338,7 +340,7 @@ async function scoreRelationshipTurn(params: {
         session_id: params.sessionId,
         character_id: params.characterId,
         chat_mode: params.chatMode,
-        scope_key: "global",
+        scope_key: scopeKey,
         user_message: params.userText,
         assistant_message: params.assistantText,
         relationship: params.currentRelationship,
@@ -366,6 +368,7 @@ async function updateRelationshipAndMemoryBestEffort(params: {
 }) {
   const enabled = envFlag("TOUHOU_RELATIONSHIP_ENABLED", true);
   if (!enabled) return;
+  const memScopeKey = `char:${params.characterId}`;
 
   const confThreshold = clampNum(
     process.env.TOUHOU_RELATIONSHIP_CONFIDENCE_THRESHOLD ?? "0.55",
@@ -458,7 +461,7 @@ async function updateRelationshipAndMemoryBestEffort(params: {
       .from("touhou_user_memory")
       .select("topics,emotions,recurring_issues,traits,rev")
       .eq("user_id", params.userId)
-      .eq("scope_key", "global")
+      .eq("scope_key", memScopeKey)
       .maybeSingle();
 
     const prevTopics = Array.isArray((data as any)?.topics) ? ((data as any).topics as string[]) : [];
@@ -477,7 +480,7 @@ async function updateRelationshipAndMemoryBestEffort(params: {
     const { error } = await params.supabase.from("touhou_user_memory").upsert(
       {
         user_id: params.userId,
-        scope_key: "global",
+        scope_key: memScopeKey,
         topics: nextTopics,
         emotions: nextEmotions,
         recurring_issues: nextRecurring,

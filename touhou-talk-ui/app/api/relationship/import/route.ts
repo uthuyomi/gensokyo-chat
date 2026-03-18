@@ -78,7 +78,9 @@ export async function POST(req: NextRequest) {
     const memRows: any[] = Array.isArray(body.memories) ? (body.memories as any[]) : [];
     const memUpserts = memRows
       .map((r) => {
-        const scopeKey = String(r?.scope_key ?? "global").trim() || "global";
+        const scopeKey = String(r?.scope_key ?? "").trim();
+        // This project uses character-scoped memory only (no "global" memory).
+        if (!scopeKey || scopeKey.toLowerCase() === "global") return null;
         return {
           user_id: userId,
           scope_key: scopeKey,
@@ -103,4 +105,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized", detail: String(e ?? "") }, { status: 401 });
   }
 }
-
