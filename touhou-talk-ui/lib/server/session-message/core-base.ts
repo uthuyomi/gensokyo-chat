@@ -31,7 +31,7 @@ export async function resolveCoreBaseUrl(params: {
   requestedMode: string | null;
 }): Promise<string> {
   const requested = String(params.requestedMode ?? "").trim().toLowerCase();
-  if (requested !== "local") return coreBaseUrl();
+  if (requested !== "local" && requested !== "fly") return coreBaseUrl();
   if (!(await isDevCoreToggleAllowed(params.supabase))) return coreBaseUrl();
-  return localCoreBaseUrl();
+  return requested === "local" ? localCoreBaseUrl() : coreBaseUrl();
 }
