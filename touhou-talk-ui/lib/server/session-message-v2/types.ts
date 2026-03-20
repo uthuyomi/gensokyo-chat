@@ -80,3 +80,11 @@ export type UserMemoryState = {
   recurring_issues: string[];
   traits: string[];
 };
+
+export type ParsedSessionMessageRequestBody = {
+  characterId: string;
+  text: string;
+  coreModeRaw: FormDataEntryValue | null;
+  files: File[];
+  urls: string[];
+};

@@ -12,15 +12,15 @@ export type SessionMessageLoadedContext = {
   userId: string;
   sessionId: string;
   accessToken: string | null;
-  base: string;
-  coreHistory: Array<{ role: "user" | "assistant"; content: string }>;
   conv: Record<string, unknown>;
+  coreHistory: Array<{ role: "user" | "assistant"; content: string }>;
+  base: string;
   chatMode: TouhouChatMode;
 };
 
 export async function buildSessionMessageContext(params: {
   context: SessionMessageRouteContext;
-  coreModeRaw: unknown;
+  coreModeRaw: FormDataEntryValue | null;
 }): Promise<SessionMessageLoadedContext | Response> {
   const { sessionId } = await params.context.params;
   if (!sessionId || typeof sessionId !== "string") {
@@ -52,14 +52,17 @@ export async function buildSessionMessageContext(params: {
         .limit(1)
         .maybeSingle();
 
-      const lastIso = (data as { created_at?: unknown } | null)?.created_at;
+      const lastIso = (data as any)?.created_at;
       const lastTs = typeof lastIso === "string" ? Date.parse(lastIso) : NaN;
+
       if (Number.isFinite(lastTs) && Date.now() - lastTs < minIntervalMs) {
         return NextResponse.json(
           { error: "Rate limited" },
           {
             status: 429,
-            headers: { "Retry-After": String(Math.ceil(minIntervalMs / 1000)) },
+            headers: {
+              "Retry-After": String(Math.ceil(minIntervalMs / 1000)),
+            },
           },
         );
       }
@@ -87,6 +90,7 @@ export async function buildSessionMessageContext(params: {
     .maybeSingle();
 
   if (convError) {
+    console.error("[touhou] conversation select error:", convError);
     return NextResponse.json({ error: "DB error" }, { status: 500 });
   }
 
@@ -106,7 +110,8 @@ export async function buildSessionMessageContext(params: {
 
   const base = await resolveCoreBaseUrl({
     supabase,
-    requestedMode: typeof params.coreModeRaw === "string" ? params.coreModeRaw : null,
+    requestedMode:
+      typeof params.coreModeRaw === "string" ? params.coreModeRaw : null,
   });
 
   const chatModeRaw =
@@ -115,16 +120,18 @@ export async function buildSessionMessageContext(params: {
       : null;
 
   const chatMode: TouhouChatMode =
-    chatModeRaw === "roleplay" || chatModeRaw === "coach" ? chatModeRaw : "partner";
+    chatModeRaw === "roleplay" || chatModeRaw === "coach"
+      ? chatModeRaw
+      : "partner";
 
   return {
     supabase,
     userId,
     sessionId,
     accessToken,
-    base,
-    coreHistory,
     conv: conv as Record<string, unknown>,
+    coreHistory,
+    base,
     chatMode,
   };
 }

@@ -90,6 +90,9 @@ async function writeDefaultEnv(bundleRoot, repoRoot) {
     !/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\/?$/i.test(sigmarisCoreFromRepo)
       ? sigmarisCoreFromRepo
       : "https://project-sigmaris.fly.dev/";
+  const localCoreFromRepo = String(vars.SIGMARIS_CORE_URL_LOCAL ?? "").trim();
+  const sigmarisCoreLocalUrl =
+    localCoreFromRepo || "http://127.0.0.1:8000";
 
   // Feature flags (optional)
   const autoBrowseEnabled = String(vars.TOUHOU_AUTO_BROWSE_ENABLED ?? "").trim();
@@ -116,6 +119,7 @@ async function writeDefaultEnv(bundleRoot, repoRoot) {
     "# Backend Persona OS URL (public)",
     `SIGMARIS_CORE_URL=${sigmarisCoreUrl}`,
     `NEXT_PUBLIC_SIGMARIS_CORE=${sigmarisCoreUrl}`,
+    `SIGMARIS_CORE_URL_LOCAL=${sigmarisCoreLocalUrl}`,
     "",
   ].join("\n");
 

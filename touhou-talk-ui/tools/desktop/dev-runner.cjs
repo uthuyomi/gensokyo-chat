@@ -210,6 +210,11 @@ async function main() {
     pickNonEmpty(fileVars, "SIGMARIS_CORE_URL") ||
     pickNonEmpty(appEnv, "SIGMARIS_CORE_URL") ||
     pickNonEmpty(repoEnv, "SIGMARIS_CORE_URL");
+  const localCoreUrl =
+    pickNonEmpty(defaultVars, "SIGMARIS_CORE_URL_LOCAL") ||
+    pickNonEmpty(fileVars, "SIGMARIS_CORE_URL_LOCAL") ||
+    pickNonEmpty(appEnv, "SIGMARIS_CORE_URL_LOCAL") ||
+    pickNonEmpty(repoEnv, "SIGMARIS_CORE_URL_LOCAL");
   const publicCoreUrl =
     pickNonEmpty(defaultVars, "NEXT_PUBLIC_SIGMARIS_CORE") ||
     pickNonEmpty(fileVars, "NEXT_PUBLIC_SIGMARIS_CORE") ||
@@ -244,6 +249,7 @@ async function main() {
   if (supabaseUrl) mergedEnv.SUPABASE_URL = supabaseUrl;
   if (supabaseAnon) mergedEnv.SUPABASE_ANON_KEY = supabaseAnon;
   if (coreUrl) mergedEnv.SIGMARIS_CORE_URL = coreUrl;
+  if (localCoreUrl) mergedEnv.SIGMARIS_CORE_URL_LOCAL = localCoreUrl;
   if (publicCoreUrl) mergedEnv.NEXT_PUBLIC_SIGMARIS_CORE = publicCoreUrl;
   setIfEmpty("TOUHOU_AUTO_BROWSE_ENABLED", autoBrowse);
   setIfEmpty("TOUHOU_UPLOAD_ENABLED", uploadEnabled);
@@ -268,6 +274,11 @@ async function main() {
   );
   console.log(
     `[desktop:dev] sigmaris core: ${desktopEnv.SIGMARIS_CORE_URL ? desktopEnv.SIGMARIS_CORE_URL : "MISSING"}`,
+  );
+  console.log(
+    `[desktop:dev] sigmaris core local: ${
+      desktopEnv.SIGMARIS_CORE_URL_LOCAL ? desktopEnv.SIGMARIS_CORE_URL_LOCAL : "MISSING"
+    }`,
   );
 
   const nextProc = spawn(process.execPath, [devScript, "--port", String(port)], {

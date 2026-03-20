@@ -3,6 +3,7 @@ import type { supabaseServer } from "@/lib/supabase-server";
 export function coreBaseUrl() {
   const raw =
     process.env.SIGMARIS_CORE_URL ||
+    process.env.NEXT_PUBLIC_SIGMARIS_CORE ||
     process.env.PERSONA_OS_LOCAL_URL ||
     process.env.PERSONA_OS_URL ||
     "http://127.0.0.1:8000";
