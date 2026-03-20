@@ -38,10 +38,8 @@ function useReducedMotion(): boolean {
       return () => mql.removeEventListener("change", update);
     } catch {
       // Safari old API
-      // eslint-disable-next-line deprecation/deprecation
       mql.addListener?.(update);
       return () => {
-        // eslint-disable-next-line deprecation/deprecation
         mql.removeListener?.(update);
       };
     }

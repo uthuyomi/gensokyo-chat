@@ -188,25 +188,11 @@ function LocationPin({
     },
     buttonRef,
   );
-  const {
-    onDrag: _onDrag,
-    onDragStart: _onDragStart,
-    onDragEnd: _onDragEnd,
-    onDragEnter: _onDragEnter,
-    onDragLeave: _onDragLeave,
-    onDragOver: _onDragOver,
-    onDrop: _onDrop,
-    onAnimationStart: _onAnimationStart,
-    onAnimationEnd: _onAnimationEnd,
-    onAnimationIteration: _onAnimationIteration,
-    ...safeButtonProps
-  } = buttonProps;
-
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <motion.button
-          {...safeButtonProps}
+          {...buttonProps}
           ref={buttonRef}
           type="button"
           aria-pressed={isActive}
@@ -311,7 +297,10 @@ export default function WorldMap({ layer, backgroundSrc, locations }: Props) {
   const [loadingChar, setLoadingChar] = useState<string | null>(null);
 
   useEffect(() => {
-    setNaturalSize({ width: 0, height: 0 });
+    const resetId = window.setTimeout(() => {
+      setNaturalSize({ width: 0, height: 0 });
+    }, 0);
+    return () => window.clearTimeout(resetId);
   }, [mapSrc]);
 
   useEffect(() => {
@@ -384,7 +373,6 @@ export default function WorldMap({ layer, backgroundSrc, locations }: Props) {
     router.push(`/chat/session?${params.toString()}`);
   };
 
-  const hint = "マップ上の地点を選択";
   const closeIfClickedOnMap = (e: ReactMouseEvent<HTMLDivElement>) => {
     if (!activeId) return;
     const t = e.target as HTMLElement | null;

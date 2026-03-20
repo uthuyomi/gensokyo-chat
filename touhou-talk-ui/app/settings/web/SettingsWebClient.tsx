@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import DevCoreToggle from "@/components/dev/DevCoreToggle";
@@ -42,15 +42,9 @@ function ThemeButton({
 }
 
 export default function SettingsWebClient() {
-  const [skipMap, setSkipMapState] = useState(false);
-  const [theme, setThemeState] = useState<TouhouTheme>("dark");
-  const [chatMode, setChatMode] = useState<TouhouChatMode>("partner");
-
-  useEffect(() => {
-    setSkipMapState(getSkipMapOnStart());
-    setThemeState(getTheme());
-    setChatMode(getDefaultChatMode());
-  }, []);
+  const [skipMap, setSkipMapState] = useState(() => getSkipMapOnStart());
+  const [theme, setThemeState] = useState<TouhouTheme>(() => getTheme());
+  const [chatMode, setChatMode] = useState<TouhouChatMode>(() => getDefaultChatMode());
 
   const updateTheme = (t: TouhouTheme) => {
     setThemeState(t);

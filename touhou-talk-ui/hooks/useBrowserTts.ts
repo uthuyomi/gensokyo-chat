@@ -51,15 +51,15 @@ export function useBrowserTts(defaultLang = "ja-JP") {
 
   useEffect(() => {
     if (!ss) return;
-    refreshVoices();
+    const refreshTimer = window.setTimeout(() => refreshVoices(), 0);
     const handler = () => refreshVoices();
     try {
       (ss as any).addEventListener?.("voiceschanged", handler);
-      (ss as any).onvoiceschanged = handler;
     } catch {
       // ignore
     }
     return () => {
+      window.clearTimeout(refreshTimer);
       try {
         (ss as any).removeEventListener?.("voiceschanged", handler);
       } catch {
@@ -132,4 +132,3 @@ export function useBrowserTts(defaultLang = "ja-JP") {
     cancel,
   };
 }
-

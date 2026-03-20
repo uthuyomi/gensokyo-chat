@@ -7,12 +7,27 @@ import { NextRequest, NextResponse } from "next/server";
 import "server-only";
 
 import { supabaseServer, requireUserId } from "@/lib/supabase-server";
-import { buildTouhouPersonaSystem, genParamsFor, type TouhouChatMode } from "@/lib/touhouPersona";
-import { worldEngineBaseUrl, worldEngineHeaders } from "@/app/api/world/_worldEngine";
+import {
+  buildTouhouPersonaSystem,
+  genParamsFor,
+  type TouhouChatMode,
+} from "@/lib/touhouPersona";
+import {
+  worldEngineBaseUrl,
+  worldEngineHeaders,
+} from "@/app/api/world/_worldEngine";
 import { resolveCoreBaseUrl } from "@/lib/server/session-message/core-base";
 import { loadCoreHistory } from "@/lib/server/session-message/history";
-import { isRecord, mergeMeta, sha256Hex } from "@/lib/server/session-message/meta";
-import { enforceOrigin, envFlag, wantsStream } from "@/lib/server/session-message/request";
+import {
+  isRecord,
+  mergeMeta,
+  sha256Hex,
+} from "@/lib/server/session-message/meta";
+import {
+  enforceOrigin,
+  envFlag,
+  wantsStream,
+} from "@/lib/server/session-message/request";
 import type {
   PersonaIntentResponse,
   RelationshipState,
@@ -21,7 +36,6 @@ import type {
   Phase04LinkAnalysis,
   RelationshipScoreResponse,
   PersonaChatResponse,
-
 } from "@/lib/server/session-message-v2/types";
 
 import {
@@ -33,8 +47,7 @@ import {
   outputStyleBlock,
   reimuDirectorOverlay,
   lintOutputStyle,
-  coerceToForcedStyle
-
+  coerceToForcedStyle,
 } from "@/lib/server/session-message-v2/director";
 
 import {
@@ -55,12 +68,15 @@ import {
   uploadAndParseFiles,
   analyzeLinks,
   autoBrowseFromText,
-  buildAugmentedMessage
+  buildAugmentedMessage,
 } from "@/lib/server/session-message-v2/retrieval";
 
 import {
   retrievalSystemHint,
   toStateSnapshotRow,
+  saveUserMessage,
+  saveAssistantMessage,
+  saveStateSnapshot,
 } from "@/lib/server/session-message-v2/persistence";
 
 function looksLikeMissingColumn(err: unknown, column: string) {
@@ -68,7 +84,9 @@ function looksLikeMissingColumn(err: unknown, column: string) {
     (typeof (err as { message?: unknown } | null)?.message === "string"
       ? String((err as { message?: unknown }).message)
       : "") || String(err ?? "");
-  return msg.includes(column) && (msg.includes("column") || msg.includes("schema"));
+  return (
+    msg.includes(column) && (msg.includes("column") || msg.includes("schema"))
+  );
 }
 
 function clampNum(v: unknown, min: number, max: number, fallback: number) {
@@ -95,7 +113,10 @@ async function loadRelationshipAndMemoryBestEffort(params: {
   supabase: Awaited<ReturnType<typeof supabaseServer>>;
   userId: string;
   characterId: string;
-}): Promise<{ relationship: RelationshipState; memory: UserMemoryState | null }> {
+}): Promise<{
+  relationship: RelationshipState;
+  memory: UserMemoryState | null;
+}> {
   let trust = 0;
   let familiarity = 0;
   const memScopeKey = `char:${params.characterId}`;
@@ -125,24 +146,35 @@ async function loadRelationshipAndMemoryBestEffort(params: {
       .eq("scope_key", memScopeKey)
       .maybeSingle();
 
-    const topics = Array.isArray((data as any)?.topics) ? ((data as any).topics as string[]) : [];
-    const emotions = Array.isArray((data as any)?.emotions) ? ((data as any).emotions as string[]) : [];
+    const topics = Array.isArray((data as any)?.topics)
+      ? ((data as any).topics as string[])
+      : [];
+    const emotions = Array.isArray((data as any)?.emotions)
+      ? ((data as any).emotions as string[])
+      : [];
     const recurring = Array.isArray((data as any)?.recurring_issues)
       ? ((data as any).recurring_issues as string[])
       : [];
-    const traits = Array.isArray((data as any)?.traits) ? ((data as any).traits as string[]) : [];
+    const traits = Array.isArray((data as any)?.traits)
+      ? ((data as any).traits as string[])
+      : [];
 
     return {
       relationship: { trust, familiarity },
       memory: {
         topics: topics.map((s) => String(s ?? "").trim()).filter(Boolean),
         emotions: emotions.map((s) => String(s ?? "").trim()).filter(Boolean),
-        recurring_issues: recurring.map((s) => String(s ?? "").trim()).filter(Boolean),
+        recurring_issues: recurring
+          .map((s) => String(s ?? "").trim())
+          .filter(Boolean),
         traits: traits.map((s) => String(s ?? "").trim()).filter(Boolean),
       },
     };
   } catch (e) {
-    if (looksLikeMissingColumn(e, "touhou_user_memory") || looksLikeMissingColumn(e, "recurring_issues")) {
+    if (
+      looksLikeMissingColumn(e, "touhou_user_memory") ||
+      looksLikeMissingColumn(e, "recurring_issues")
+    ) {
       return { relationship: { trust, familiarity }, memory: null };
     }
     return { relationship: { trust, familiarity }, memory: null };
@@ -153,7 +185,15 @@ function relationshipStanceLabel(rel: RelationshipState) {
   const t = clampNum(rel.trust, -1, 1, 0);
   const f = clampNum(rel.familiarity, 0, 1, 0);
   const trustBand =
-    t <= -0.6 ? "不信（強）" : t <= -0.2 ? "不信" : t < 0.2 ? "中立" : t < 0.6 ? "信頼" : "信頼（強）";
+    t <= -0.6
+      ? "不信（強）"
+      : t <= -0.2
+        ? "不信"
+        : t < 0.2
+          ? "中立"
+          : t < 0.6
+            ? "信頼"
+            : "信頼（強）";
   const famBand = f < 0.25 ? "低" : f < 0.6 ? "中" : "高";
   return { trustBand, famBand };
 }
@@ -169,18 +209,40 @@ function buildRelationshipMemoryOverlay(params: {
 
   const lines: string[] = [];
   lines.push("# Relationship / Memory (internal)");
-  lines.push("- IMPORTANT: Do not mention these numbers or labels directly to the user.");
-  lines.push(`- relationship.trust: ${trust.toFixed(3)} (range -1..1) / band=${trustBand}`);
-  lines.push(`- relationship.familiarity: ${familiarity.toFixed(3)} (range 0..1) / band=${famBand}`);
+  lines.push(
+    "- IMPORTANT: Do not mention these numbers or labels directly to the user.",
+  );
+  lines.push(
+    `- relationship.trust: ${trust.toFixed(3)} (range -1..1) / band=${trustBand}`,
+  );
+  lines.push(
+    `- relationship.familiarity: ${familiarity.toFixed(3)} (range 0..1) / band=${famBand}`,
+  );
 
   const style: string[] = [];
-  if (trust <= -0.6) style.push("Very cautious: prioritize verification questions; avoid strong assertions.");
-  else if (trust <= -0.2) style.push("Cautious: reduce certainty; confirm intent before advising.");
-  else if (trust >= 0.6) style.push("High trust: allow warmer reassurance and concrete suggestions.");
-  else if (trust >= 0.2) style.push("Neutral-positive: be helpful and steady; avoid overfamiliar leaps.");
+  if (trust <= -0.6)
+    style.push(
+      "Very cautious: prioritize verification questions; avoid strong assertions.",
+    );
+  else if (trust <= -0.2)
+    style.push("Cautious: reduce certainty; confirm intent before advising.");
+  else if (trust >= 0.6)
+    style.push(
+      "High trust: allow warmer reassurance and concrete suggestions.",
+    );
+  else if (trust >= 0.2)
+    style.push(
+      "Neutral-positive: be helpful and steady; avoid overfamiliar leaps.",
+    );
 
-  if (familiarity >= 0.7) style.push("High familiarity: more casual phrasing is OK (still in-character).");
-  else if (familiarity <= 0.2) style.push("Low familiarity: keep a bit more distance; do not assume intimacy.");
+  if (familiarity >= 0.7)
+    style.push(
+      "High familiarity: more casual phrasing is OK (still in-character).",
+    );
+  else if (familiarity <= 0.2)
+    style.push(
+      "Low familiarity: keep a bit more distance; do not assume intimacy.",
+    );
 
   if (style.length) {
     lines.push(`- Style tuning: ${style.join(" ")}`);
@@ -201,9 +263,12 @@ function buildRelationshipMemoryOverlay(params: {
     lines.push("# User memory (extracted)");
     if (topics.length) lines.push(`- topics: ${topics.join(", ")}`);
     if (emotions.length) lines.push(`- emotions: ${emotions.join(", ")}`);
-    if (recurring.length) lines.push(`- recurring_issues: ${recurring.join(", ")}`);
+    if (recurring.length)
+      lines.push(`- recurring_issues: ${recurring.join(", ")}`);
     if (traits.length) lines.push(`- traits: ${traits.join(", ")}`);
-    lines.push("- IMPORTANT: Use this only when relevant; do not recite it as a list.");
+    lines.push(
+      "- IMPORTANT: Use this only when relevant; do not recite it as a list.",
+    );
   }
 
   return lines.join("\n");
@@ -213,7 +278,11 @@ type WorldPromptContext = {
   world_id: string;
   location_id: string;
   state: Record<string, unknown> | null;
-  recent_events: Array<{ event_type: string; summary: string; created_at?: string | null }>;
+  recent_events: Array<{
+    event_type: string;
+    summary: string;
+    created_at?: string | null;
+  }>;
 };
 
 async function loadWorldPromptContextBestEffort(params: {
@@ -226,16 +295,29 @@ async function loadWorldPromptContextBestEffort(params: {
 
   const base = worldEngineBaseUrl();
   const headers = worldEngineHeaders();
-  const qs = new URLSearchParams({ world_id: worldId, location_id: locationId }).toString();
+  const qs = new URLSearchParams({
+    world_id: worldId,
+    location_id: locationId,
+  }).toString();
 
   const [stateRes, recentRes] = await Promise.all([
-    fetch(`${base}/world/state?${qs}`, { headers, cache: "no-store" }).catch(() => null),
-    fetch(`${base}/world/recent?${qs}&limit=8`, { headers, cache: "no-store" }).catch(() => null),
+    fetch(`${base}/world/state?${qs}`, { headers, cache: "no-store" }).catch(
+      () => null,
+    ),
+    fetch(`${base}/world/recent?${qs}&limit=8`, {
+      headers,
+      cache: "no-store",
+    }).catch(() => null),
   ]);
 
-  const state = stateRes && (stateRes as Response).ok ? await (stateRes as Response).json().catch(() => null) : null;
+  const state =
+    stateRes && (stateRes as Response).ok
+      ? await (stateRes as Response).json().catch(() => null)
+      : null;
   const recentJson =
-    recentRes && (recentRes as Response).ok ? await (recentRes as Response).json().catch(() => null) : null;
+    recentRes && (recentRes as Response).ok
+      ? await (recentRes as Response).json().catch(() => null)
+      : null;
   const recent_events = Array.isArray((recentJson as any)?.recent_events)
     ? ((recentJson as any).recent_events as any[])
         .map((e) => ({
@@ -281,7 +363,9 @@ function buildWorldOverlay(world: WorldPromptContext | null): string | null {
     }
   }
 
-  lines.push("- IMPORTANT: Use this as ambient context; do not dump it verbatim.");
+  lines.push(
+    "- IMPORTANT: Use this as ambient context; do not dump it verbatim.",
+  );
   return lines.join("\n");
 }
 
@@ -302,7 +386,9 @@ async function scoreRelationshipTurn(params: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(params.accessToken ? { Authorization: `Bearer ${params.accessToken}` } : {}),
+        ...(params.accessToken
+          ? { Authorization: `Bearer ${params.accessToken}` }
+          : {}),
       },
       body: JSON.stringify({
         session_id: params.sessionId,
@@ -344,11 +430,36 @@ async function updateRelationshipAndMemoryBestEffort(params: {
     1.0,
     0.55,
   );
-  const alpha = clampNum(process.env.TOUHOU_RELATIONSHIP_EMA_ALPHA ?? "0.15", 0.0, 1.0, 0.15);
-  const trustStepSize = clampNum(process.env.TOUHOU_RELATIONSHIP_TRUST_STEP ?? "0.02", 0.0, 0.2, 0.02);
-  const famStepSize = clampNum(process.env.TOUHOU_RELATIONSHIP_FAMILIARITY_STEP ?? "0.02", 0.0, 0.2, 0.02);
-  const maxDeltaTrust = clampNum(process.env.TOUHOU_RELATIONSHIP_TRUST_MAX_DELTA ?? "0.02", 0.0, 0.3, 0.02);
-  const maxDeltaFam = clampNum(process.env.TOUHOU_RELATIONSHIP_FAMILIARITY_MAX_DELTA ?? "0.03", 0.0, 0.3, 0.03);
+  const alpha = clampNum(
+    process.env.TOUHOU_RELATIONSHIP_EMA_ALPHA ?? "0.15",
+    0.0,
+    1.0,
+    0.15,
+  );
+  const trustStepSize = clampNum(
+    process.env.TOUHOU_RELATIONSHIP_TRUST_STEP ?? "0.02",
+    0.0,
+    0.2,
+    0.02,
+  );
+  const famStepSize = clampNum(
+    process.env.TOUHOU_RELATIONSHIP_FAMILIARITY_STEP ?? "0.02",
+    0.0,
+    0.2,
+    0.02,
+  );
+  const maxDeltaTrust = clampNum(
+    process.env.TOUHOU_RELATIONSHIP_TRUST_MAX_DELTA ?? "0.02",
+    0.0,
+    0.3,
+    0.02,
+  );
+  const maxDeltaFam = clampNum(
+    process.env.TOUHOU_RELATIONSHIP_FAMILIARITY_MAX_DELTA ?? "0.03",
+    0.0,
+    0.3,
+    0.03,
+  );
 
   let prevTrust = 0;
   let prevFam = 0;
@@ -362,9 +473,18 @@ async function updateRelationshipAndMemoryBestEffort(params: {
       .maybeSingle();
     prevTrust = clampNum((data as any)?.trust ?? 0, -1, 1, 0);
     prevFam = clampNum((data as any)?.familiarity ?? 0, 0, 1, 0);
-    prevRelRev = clampNum((data as any)?.rev ?? 0, 0, Number.MAX_SAFE_INTEGER, 0);
+    prevRelRev = clampNum(
+      (data as any)?.rev ?? 0,
+      0,
+      Number.MAX_SAFE_INTEGER,
+      0,
+    );
   } catch (e) {
-    if (looksLikeMissingColumn(e, "familiarity") || looksLikeMissingColumn(e, "rev")) return;
+    if (
+      looksLikeMissingColumn(e, "familiarity") ||
+      looksLikeMissingColumn(e, "rev")
+    )
+      return;
   }
 
   const score = await scoreRelationshipTurn({
@@ -385,32 +505,48 @@ async function updateRelationshipAndMemoryBestEffort(params: {
   const stepTrust = clampNum(score.delta?.trust ?? 0, -2, 2, 0);
   const stepFam = clampNum(score.delta?.familiarity ?? 0, -2, 2, 0);
 
-  const dTrust = Math.max(-maxDeltaTrust, Math.min(maxDeltaTrust, stepTrust * trustStepSize));
-  const dFam = Math.max(-maxDeltaFam, Math.min(maxDeltaFam, stepFam * famStepSize));
+  const dTrust = Math.max(
+    -maxDeltaTrust,
+    Math.min(maxDeltaTrust, stepTrust * trustStepSize),
+  );
+  const dFam = Math.max(
+    -maxDeltaFam,
+    Math.min(maxDeltaFam, stepFam * famStepSize),
+  );
 
   const nextTrust = clampNum(prevTrust + alpha * dTrust, -1, 1, prevTrust);
   const nextFam = clampNum(prevFam + alpha * dFam, 0, 1, prevFam);
 
   try {
-    const { error } = await params.supabase.from("player_character_relations").upsert(
-      {
-        user_id: params.userId,
-        character_id: params.characterId,
-        scope_key: "global",
-        trust: nextTrust,
-        familiarity: nextFam,
-        rev: prevRelRev + 1,
-        last_updated: new Date().toISOString(),
-      } as any,
-      { onConflict: "user_id,character_id" },
-    );
+    const { error } = await params.supabase
+      .from("player_character_relations")
+      .upsert(
+        {
+          user_id: params.userId,
+          character_id: params.characterId,
+          scope_key: "global",
+          trust: nextTrust,
+          familiarity: nextFam,
+          rev: prevRelRev + 1,
+          last_updated: new Date().toISOString(),
+        } as any,
+        { onConflict: "user_id,character_id" },
+      );
     if (error) {
-      if (looksLikeMissingColumn(error, "scope_key") || looksLikeMissingColumn(error, "familiarity")) return;
+      if (
+        looksLikeMissingColumn(error, "scope_key") ||
+        looksLikeMissingColumn(error, "familiarity")
+      )
+        return;
       console.warn("[touhou] relationship upsert failed:", error);
       return;
     }
   } catch (e) {
-    if (looksLikeMissingColumn(e, "scope_key") || looksLikeMissingColumn(e, "familiarity")) return;
+    if (
+      looksLikeMissingColumn(e, "scope_key") ||
+      looksLikeMissingColumn(e, "familiarity")
+    )
+      return;
     console.warn("[touhou] relationship upsert failed:", e);
     return;
   }
@@ -420,9 +556,18 @@ async function updateRelationshipAndMemoryBestEffort(params: {
 
   const addTopics = Array.isArray(mem.topics_add) ? mem.topics_add : [];
   const addEmotions = Array.isArray(mem.emotions_add) ? mem.emotions_add : [];
-  const addRecurring = Array.isArray(mem.recurring_issues_add) ? mem.recurring_issues_add : [];
+  const addRecurring = Array.isArray(mem.recurring_issues_add)
+    ? mem.recurring_issues_add
+    : [];
   const addTraits = Array.isArray(mem.traits_add) ? mem.traits_add : [];
-  if (addTopics.length + addEmotions.length + addRecurring.length + addTraits.length <= 0) return;
+  if (
+    addTopics.length +
+      addEmotions.length +
+      addRecurring.length +
+      addTraits.length <=
+    0
+  )
+    return;
 
   try {
     const { data } = await params.supabase
@@ -432,13 +577,24 @@ async function updateRelationshipAndMemoryBestEffort(params: {
       .eq("scope_key", memScopeKey)
       .maybeSingle();
 
-    const prevTopics = Array.isArray((data as any)?.topics) ? ((data as any).topics as string[]) : [];
-    const prevEmotions = Array.isArray((data as any)?.emotions) ? ((data as any).emotions as string[]) : [];
+    const prevTopics = Array.isArray((data as any)?.topics)
+      ? ((data as any).topics as string[])
+      : [];
+    const prevEmotions = Array.isArray((data as any)?.emotions)
+      ? ((data as any).emotions as string[])
+      : [];
     const prevRecurring = Array.isArray((data as any)?.recurring_issues)
       ? ((data as any).recurring_issues as string[])
       : [];
-    const prevTraits = Array.isArray((data as any)?.traits) ? ((data as any).traits as string[]) : [];
-    const prevMemRev = clampNum((data as any)?.rev ?? 0, 0, Number.MAX_SAFE_INTEGER, 0);
+    const prevTraits = Array.isArray((data as any)?.traits)
+      ? ((data as any).traits as string[])
+      : [];
+    const prevMemRev = clampNum(
+      (data as any)?.rev ?? 0,
+      0,
+      Number.MAX_SAFE_INTEGER,
+      0,
+    );
 
     const nextTopics = uniqMerge(prevTopics, addTopics, 48);
     const nextEmotions = uniqMerge(prevEmotions, addEmotions, 48);
@@ -469,7 +625,7 @@ async function updateRelationshipAndMemoryBestEffort(params: {
 
 export async function runLegacySessionMessageRoute(
   req: NextRequest,
-  context: { params: Promise<{ sessionId: string }> }
+  context: { params: Promise<{ sessionId: string }> },
 ) {
   try {
     enforceOrigin(req);
@@ -512,7 +668,10 @@ export async function runLegacySessionMessageRoute(
       if (Number.isFinite(lastTs) && Date.now() - lastTs < minIntervalMs) {
         return NextResponse.json(
           { error: "Rate limited" },
-          { status: 429, headers: { "Retry-After": String(Math.ceil(minIntervalMs / 1000)) } }
+          {
+            status: 429,
+            headers: { "Retry-After": String(Math.ceil(minIntervalMs / 1000)) },
+          },
         );
       }
     } catch {
@@ -534,7 +693,7 @@ export async function runLegacySessionMessageRoute(
   if (!contentType.includes("multipart/form-data")) {
     return NextResponse.json(
       { error: "multipart/form-data required" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -548,10 +707,15 @@ export async function runLegacySessionMessageRoute(
     !characterId ||
     !text.trim()
   ) {
-    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid request body" },
+      { status: 400 },
+    );
   }
 
-  const files = formData.getAll("files").filter((f): f is File => f instanceof File);
+  const files = formData
+    .getAll("files")
+    .filter((f): f is File => f instanceof File);
   const urls = extractUrls(text);
 
   // ownership check
@@ -570,11 +734,16 @@ export async function runLegacySessionMessageRoute(
   if (!conv) {
     return NextResponse.json(
       { error: "Conversation not found or forbidden" },
-      { status: 403 }
+      { status: 403 },
     );
   }
 
-  const coreHistory = await loadCoreHistory({ supabase, sessionId, userId, limit: 16 });
+  const coreHistory = await loadCoreHistory({
+    supabase,
+    sessionId,
+    userId,
+    limit: 16,
+  });
   const base = await resolveCoreBaseUrl({
     supabase,
     requestedMode: typeof coreModeRaw === "string" ? coreModeRaw : null,
@@ -585,7 +754,9 @@ export async function runLegacySessionMessageRoute(
       ? String((conv as Record<string, unknown>).chat_mode)
       : null;
   const chatMode: TouhouChatMode =
-    chatModeRaw === "roleplay" || chatModeRaw === "coach" ? chatModeRaw : "partner";
+    chatModeRaw === "roleplay" || chatModeRaw === "coach"
+      ? chatModeRaw
+      : "partner";
 
   const relationshipEnabled = envFlag("TOUHOU_RELATIONSHIP_ENABLED", true);
   const worldPromptEnabled = envFlag("TOUHOU_WORLD_PROMPT_ENABLED", true);
@@ -600,25 +771,29 @@ export async function runLegacySessionMessageRoute(
 
   const relMemPromise = relationshipEnabled
     ? loadRelationshipAndMemoryBestEffort({ supabase, userId, characterId })
-    : Promise.resolve({ relationship: { trust: 0, familiarity: 0 }, memory: null });
+    : Promise.resolve({
+        relationship: { trust: 0, familiarity: 0 },
+        memory: null,
+      });
   const worldPromise = worldPromptEnabled
     ? loadWorldPromptContextBestEffort({ worldId: layer, locationId: location })
     : Promise.resolve(null);
 
-  const intentPromise: Promise<PersonaIntentResponse | null> = shouldUseDirectorOverlay({
-    characterId,
-    chatMode,
-  })
-    ? fetchPersonaIntent({
-        base,
-        accessToken,
-        sessionId,
-        characterId,
-        chatMode,
-        message: text.trim(),
-        history: coreHistory,
-      })
-    : Promise.resolve(null);
+  const intentPromise: Promise<PersonaIntentResponse | null> =
+    shouldUseDirectorOverlay({
+      characterId,
+      chatMode,
+    })
+      ? fetchPersonaIntent({
+          base,
+          accessToken,
+          sessionId,
+          characterId,
+          chatMode,
+          message: text.trim(),
+          history: coreHistory,
+        })
+      : Promise.resolve(null);
   const isProd = process.env.NODE_ENV === "production";
   const uploadsEnabled = envFlag("TOUHOU_UPLOAD_ENABLED", !isProd);
   const linkAnalysisEnabled = envFlag("TOUHOU_LINK_ANALYSIS_ENABLED", !isProd);
@@ -632,7 +807,11 @@ export async function runLegacySessionMessageRoute(
   if (linkAnalysisEnabled && urls.length > 0) {
     phase04Links = await analyzeLinks({ base, accessToken, urls });
   } else if (autoBrowseEnabled) {
-    phase04Links = await autoBrowseFromText({ base, accessToken, userText: text.trim() });
+    phase04Links = await autoBrowseFromText({
+      base,
+      accessToken,
+      userText: text.trim(),
+    });
   } else {
     phase04Links = [];
   }
@@ -641,34 +820,26 @@ export async function runLegacySessionMessageRoute(
     uploads: phase04Uploads,
     linkAnalyses: phase04Links,
   });
-  const coreAttachments = [...phase04Uploads, ...phase04Links] as unknown as Record<
-    string,
-    unknown
-  >[];
+  const coreAttachments = [
+    ...phase04Uploads,
+    ...phase04Links,
+  ] as unknown as Record<string, unknown>[];
 
   // store user message
-  const { error: userInsertError } = await supabase
-    .from("common_messages")
-    .insert({
-      session_id: sessionId,
-      user_id: userId,
-      app: "touhou",
-      role: "user",
-      content: text,
-      speaker_id: null,
-      meta: {
-        phase04: {
-          uploads: phase04Uploads,
-          link_analyses: phase04Links,
-        },
-      },
-    });
+  const userInsertError = await saveUserMessage({
+    supabase,
+    sessionId,
+    userId,
+    content: text,
+    phase04Uploads,
+    phase04Links,
+  });
 
   if (userInsertError) {
     console.error("[touhou] user message insert error:", userInsertError);
     return NextResponse.json(
       { error: "Failed to save user message" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
@@ -692,7 +863,10 @@ export async function runLegacySessionMessageRoute(
   });
 
   // Turn-scoped tuning: prefer "tell the model" over "delete later".
-  const lowerRecentUser = buildRecentUserText({ history: coreHistory, currentUserText: text });
+  const lowerRecentUser = buildRecentUserText({
+    history: coreHistory,
+    currentUserText: text,
+  });
   const saisenRe = /(?:賽銭箱|お賽銭|賽銭|寄付)/i;
   const userMentionsSaisen = saisenRe.test(lowerRecentUser);
   const assistantRecentText = coreHistory
@@ -703,9 +877,15 @@ export async function runLegacySessionMessageRoute(
   const assistantRecentlyMentionedSaisen = saisenRe.test(assistantRecentText);
 
   const turnTuningLines: string[] = [];
-  if (chatMode === "roleplay" && characterId === "reimu" && !userMentionsSaisen) {
+  if (
+    chatMode === "roleplay" &&
+    characterId === "reimu" &&
+    !userMentionsSaisen
+  ) {
     if (assistantRecentlyMentionedSaisen) {
-      turnTuningLines.push("- このターンは賽銭/寄付ネタを出さない（クールダウン）。");
+      turnTuningLines.push(
+        "- このターンは賽銭/寄付ネタを出さない（クールダウン）。",
+      );
     } else {
       turnTuningLines.push("- 賽銭/寄付ネタは最大1文まで（連発しない）。");
     }
@@ -714,7 +894,11 @@ export async function runLegacySessionMessageRoute(
   const directorOverlay = intent ? reimuDirectorOverlay(intent) : "";
   const relationshipOverlay =
     relationshipEnabled && relMem
-      ? buildRelationshipMemoryOverlay({ characterId, rel: relMem.relationship, mem: relMem.memory })
+      ? buildRelationshipMemoryOverlay({
+          characterId,
+          rel: relMem.relationship,
+          mem: relMem.memory,
+        })
       : null;
   const worldOverlay = buildWorldOverlay(worldCtx);
 
@@ -722,13 +906,17 @@ export async function runLegacySessionMessageRoute(
     personaSystemBase,
     relationshipOverlay,
     worldOverlay,
-    turnTuningLines.length > 0 ? `# Turn constraints\n${turnTuningLines.join("\n")}` : null,
+    turnTuningLines.length > 0
+      ? `# Turn constraints\n${turnTuningLines.join("\n")}`
+      : null,
     directorOverlay || null,
   ]
     .filter(Boolean)
     .join("\n\n");
   const retrievalHint = retrievalSystemHint({ linkAnalyses: phase04Links });
-  const personaSystemWithRetrieval = retrievalHint ? `${personaSystem}\n\n# Retrieval\n${retrievalHint}` : personaSystem;
+  const personaSystemWithRetrieval = retrievalHint
+    ? `${personaSystem}\n\n# Retrieval\n${retrievalHint}`
+    : personaSystem;
   const personaSystemSha256 = sha256Hex(personaSystemWithRetrieval);
   const gen = genParamsFor(characterId);
   const streamMode = wantsStream(req);
@@ -763,32 +951,33 @@ export async function runLegacySessionMessageRoute(
       forced_output_style_reason: "clarify_short_circuit",
     });
 
-    const { error: aiInsertError } = await supabase.from("common_messages").insert({
-      session_id: sessionId,
-      user_id: userId,
-      app: "touhou",
-      role: "ai",
+    const aiInsertError = await saveAssistantMessage({
+      supabase,
+      sessionId,
+      userId,
+      characterId,
       content: replyFinal,
-      speaker_id: characterId,
       meta: mergedMeta,
     });
 
     if (aiInsertError) {
       console.error("[touhou] ai message insert error:", aiInsertError);
-      return NextResponse.json({ error: "Failed to save ai message" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to save ai message" },
+        { status: 500 },
+      );
     }
 
     if (isRecord(mergedMeta)) {
-      try {
-        await supabase.from("common_state_snapshots").insert([
-          toStateSnapshotRow({
-            userId,
-            sessionId,
-            meta: mergedMeta as Record<string, unknown>,
-          }),
-        ]);
-      } catch (e) {
-        console.warn("[touhou] state snapshot insert failed:", e);
+      const snapshotError = await saveStateSnapshot({
+        supabase,
+        userId,
+        sessionId,
+        meta: mergedMeta as Record<string, unknown>,
+      });
+
+      if (snapshotError) {
+        console.warn("[touhou] state snapshot insert failed:", snapshotError);
       }
     }
 
@@ -805,7 +994,11 @@ export async function runLegacySessionMessageRoute(
     });
 
     if (!streamMode) {
-      return NextResponse.json({ role: "ai", content: replyFinal, meta: mergedMeta });
+      return NextResponse.json({
+        role: "ai",
+        content: replyFinal,
+        meta: mergedMeta,
+      });
     }
 
     const ts = new TransformStream();
@@ -813,11 +1006,12 @@ export async function runLegacySessionMessageRoute(
     try {
       await writer.write(toSse("start", { sessionId }));
       await writer.write(toSse("delta", { text: replyFinal }));
-      await writer.write(toSse("done", { reply: replyFinal, meta: mergedMeta }));
+      await writer.write(
+        toSse("done", { reply: replyFinal, meta: mergedMeta }),
+      );
     } catch {
       // ignore
     } finally {
-      let replyGuarded = "";
       try {
         await writer.close();
       } catch {
@@ -857,7 +1051,10 @@ export async function runLegacySessionMessageRoute(
     if (!r.ok) {
       const detail = await r.text().catch(() => "");
       console.error("[touhou] core /persona/chat failed:", r.status, detail);
-      return NextResponse.json({ error: "Persona core failed" }, { status: 502 });
+      return NextResponse.json(
+        { error: "Persona core failed" },
+        { status: 502 },
+      );
     }
 
     const data = (await r.json()) as PersonaChatResponse;
@@ -887,9 +1084,17 @@ export async function runLegacySessionMessageRoute(
         forcedStyleReason = lint1.reason;
 
         // No extra LLM call: do a minimal local coercion to the forced style.
-        const coerced = coerceToForcedStyle({ style, intent, reply: replyFinal });
+        const coerced = coerceToForcedStyle({
+          style,
+          intent,
+          reply: replyFinal,
+        });
         if (coerced.applied) {
-          const lint2 = lintOutputStyle({ style, intent, reply: coerced.reply });
+          const lint2 = lintOutputStyle({
+            style,
+            intent,
+            reply: coerced.reply,
+          });
           forcedStyleRetry = true;
           if (lint2.ok) {
             forcedStylePassed = true;
@@ -925,37 +1130,33 @@ export async function runLegacySessionMessageRoute(
         : { director_overlay: false }),
     });
 
-    const { error: aiInsertError } = await supabase
-      .from("common_messages")
-      .insert({
-        session_id: sessionId,
-        user_id: userId,
-        app: "touhou",
-        role: "ai",
-        content: replyFinal,
-        speaker_id: characterId,
-        meta: mergedMeta,
-      });
+    const aiInsertError = await saveAssistantMessage({
+      supabase,
+      sessionId,
+      userId,
+      characterId,
+      content: replyFinal,
+      meta: mergedMeta,
+    });
 
     if (aiInsertError) {
       console.error("[touhou] ai message insert error:", aiInsertError);
       return NextResponse.json(
         { error: "Failed to save ai message" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
     if (isRecord(mergedMeta)) {
-      try {
-        await supabase.from("common_state_snapshots").insert([
-          toStateSnapshotRow({
-            userId,
-            sessionId,
-            meta: mergedMeta as Record<string, unknown>,
-          }),
-        ]);
-      } catch (e) {
-        console.warn("[touhou] state snapshot insert failed:", e);
+      const snapshotError = await saveStateSnapshot({
+        supabase,
+        userId,
+        sessionId,
+        meta: mergedMeta as Record<string, unknown>,
+      });
+
+      if (snapshotError) {
+        console.warn("[touhou] state snapshot insert failed:", snapshotError);
       }
     }
 
@@ -1017,7 +1218,7 @@ export async function runLegacySessionMessageRoute(
     console.error("[touhou] core stream failed:", upstream.status, detail);
     return NextResponse.json(
       { error: "Persona core stream failed", detail },
-      { status: 502 }
+      { status: 502 },
     );
   }
 
@@ -1068,80 +1269,95 @@ export async function runLegacySessionMessageRoute(
           const dataLines: string[] = [];
           for (const line of lines) {
             if (line.startsWith("event:")) event = line.slice(6).trim();
-            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+            else if (line.startsWith("data:"))
+              dataLines.push(line.slice(5).trim());
           }
           const dataRaw = dataLines.join("\n");
 
           if (event === "delta") {
             try {
-                const parsed = JSON.parse(dataRaw);
-                const textPart =
-                  isRecord(parsed) && typeof parsed.text === "string"
-                    ? parsed.text
-                    : "";
-                if (textPart) replyAcc += textPart;
-                await writer.write(toSse("delta", { text: textPart }));
-              } catch {
-                await writer.write(`event: delta\ndata: ${dataRaw}\n\n`);
-              }
-            } else if (event === "done") {
-              try {
-                const parsed = JSON.parse(dataRaw);
-                const reply =
-                  isRecord(parsed) && typeof parsed.reply === "string"
-                    ? parsed.reply
-                    : replyAcc;
+              const parsed = JSON.parse(dataRaw);
+              const textPart =
+                isRecord(parsed) && typeof parsed.text === "string"
+                  ? parsed.text
+                  : "";
+              if (textPart) replyAcc += textPart;
+              await writer.write(toSse("delta", { text: textPart }));
+            } catch {
+              await writer.write(`event: delta\ndata: ${dataRaw}\n\n`);
+            }
+          } else if (event === "done") {
+            try {
+              const parsed = JSON.parse(dataRaw);
+              const reply =
+                isRecord(parsed) && typeof parsed.reply === "string"
+                  ? parsed.reply
+                  : replyAcc;
 
-                finalMeta =
-                  isRecord(parsed) && isRecord(parsed.meta)
-                    ? mergeMeta(parsed.meta, touhouUiMeta)
-                    : mergeMeta(null, touhouUiMeta);
-                const replyGuarded = sanitizeReplyByContext({
-                  characterId,
-                  chatMode,
-                  reply,
-                  history: coreHistory,
-                  currentUserText: text,
+              finalMeta =
+                isRecord(parsed) && isRecord(parsed.meta)
+                  ? mergeMeta(parsed.meta, touhouUiMeta)
+                  : mergeMeta(null, touhouUiMeta);
+              const replyGuarded = sanitizeReplyByContext({
+                characterId,
+                chatMode,
+                reply,
+                history: coreHistory,
+                currentUserText: text,
+              });
+
+              let replyFinal = replyGuarded;
+              let forcedStylePassed = true;
+              let forcedStyleRetry = false;
+              let forcedStyleReason = "";
+
+              if (intent) {
+                const style = effectiveOutputStyle(intent);
+                const lint1 = lintOutputStyle({
+                  style,
+                  intent,
+                  reply: replyFinal,
                 });
+                if (!lint1.ok) {
+                  forcedStylePassed = false;
+                  forcedStyleReason = lint1.reason;
 
-                let replyFinal = replyGuarded;
-                let forcedStylePassed = true;
-                let forcedStyleRetry = false;
-                let forcedStyleReason = "";
-
-                if (intent) {
-                  const style = effectiveOutputStyle(intent);
-                  const lint1 = lintOutputStyle({ style, intent, reply: replyFinal });
-                  if (!lint1.ok) {
-                    forcedStylePassed = false;
-                    forcedStyleReason = lint1.reason;
-
-                    const coerced = coerceToForcedStyle({ style, intent, reply: replyFinal });
-                    if (coerced.applied) {
-                      const lint2 = lintOutputStyle({ style, intent, reply: coerced.reply });
-                      forcedStyleRetry = true;
-                      if (lint2.ok) {
-                        forcedStylePassed = true;
-                        forcedStyleReason = "";
-                        replyFinal = coerced.reply;
-                      } else {
-                        forcedStyleReason = `coerce_${lint2.reason}`;
-                      }
+                  const coerced = coerceToForcedStyle({
+                    style,
+                    intent,
+                    reply: replyFinal,
+                  });
+                  if (coerced.applied) {
+                    const lint2 = lintOutputStyle({
+                      style,
+                      intent,
+                      reply: coerced.reply,
+                    });
+                    forcedStyleRetry = true;
+                    if (lint2.ok) {
+                      forcedStylePassed = true;
+                      forcedStyleReason = "";
+                      replyFinal = coerced.reply;
+                    } else {
+                      forcedStyleReason = `coerce_${lint2.reason}`;
                     }
                   }
-
-                  finalMeta = mergeMeta(finalMeta, {
-                    forced_output_style_passed: forcedStylePassed,
-                    forced_output_style_retry: forcedStyleRetry,
-                    forced_output_style_reason: forcedStyleReason,
-                  });
                 }
 
-                replyAcc = replyFinal;
-                await writer.write(toSse("done", { reply: replyFinal, meta: finalMeta }));
-              } catch {
-                await writer.write(`event: done\ndata: ${dataRaw}\n\n`);
+                finalMeta = mergeMeta(finalMeta, {
+                  forced_output_style_passed: forcedStylePassed,
+                  forced_output_style_retry: forcedStyleRetry,
+                  forced_output_style_reason: forcedStyleReason,
+                });
               }
+
+              replyAcc = replyFinal;
+              await writer.write(
+                toSse("done", { reply: replyFinal, meta: finalMeta }),
+              );
+            } catch {
+              await writer.write(`event: done\ndata: ${dataRaw}\n\n`);
+            }
           } else if (event === "start") {
             await writer.write(toSse("start", { sessionId }));
           } else if (event === "error") {
@@ -1182,9 +1398,9 @@ export async function runLegacySessionMessageRoute(
       }
 
       try {
-        await supabase.from("common_state_snapshots").insert([
-          toStateSnapshotRow({ userId, sessionId, meta: finalMeta }),
-        ]);
+        await supabase
+          .from("common_state_snapshots")
+          .insert([toStateSnapshotRow({ userId, sessionId, meta: finalMeta })]);
       } catch (e) {
         console.warn("[touhou] state snapshot insert failed:", e);
       }

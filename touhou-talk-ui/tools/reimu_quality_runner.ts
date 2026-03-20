@@ -509,7 +509,7 @@ async function main() {
     "",
   );
 
-  let rewrites = 0;
+  const rewrites = 0;
   let lintFails = 0;
   const intentCounts: Record<string, number> = {};
   const styleCounts: Record<string, number> = {};

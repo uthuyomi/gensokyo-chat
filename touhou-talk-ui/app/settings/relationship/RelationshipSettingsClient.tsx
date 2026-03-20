@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -23,6 +23,17 @@ type MemoryRow = {
   traits: string[];
   updatedAt: string | null;
 } | null;
+
+type RelationshipResponse = {
+  relationships?: RelationshipRow[];
+  memory?: MemoryRow;
+  error?: string;
+};
+
+type MutationResponse = {
+  ok?: boolean;
+  error?: string;
+};
 
 function clamp01(n: number) {
   if (!Number.isFinite(n)) return 0;
@@ -76,26 +87,26 @@ export default function RelationshipSettingsClient() {
 
   const importRef = useRef<HTMLInputElement | null>(null);
 
-  const fetchAll = async () => {
+  const fetchAll = useCallback(async () => {
     setLoading(true);
     setError(null);
     setInfo(null);
     try {
       const r = await fetch(`/api/relationship?characterId=${encodeURIComponent(selectedChar)}`, { cache: "no-store" });
-      const j = (await r.json().catch(() => null)) as any;
+      const j = (await r.json().catch(() => null)) as RelationshipResponse | null;
       if (!r.ok) throw new Error(j?.error || "fetch failed");
-      setRelationships(Array.isArray(j?.relationships) ? (j.relationships as RelationshipRow[]) : []);
+      setRelationships(Array.isArray(j?.relationships) ? j.relationships : []);
       setMemory(j?.memory ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e ?? ""));
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedChar]);
 
   useEffect(() => {
     void fetchAll();
-  }, [selectedChar]);
+  }, [selectedChar, fetchAll]);
 
   const activeRel = useMemo(() => {
     const row = relationships.find((r) => r.characterId === selectedChar) ?? null;
@@ -125,7 +136,7 @@ export default function RelationshipSettingsClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const j = (await r.json().catch(() => null)) as any;
+      const j = (await r.json().catch(() => null)) as MutationResponse | null;
       if (!r.ok) throw new Error(j?.error || "reset failed");
       setInfo("リセットしました。");
       await fetchAll();
@@ -169,7 +180,7 @@ export default function RelationshipSettingsClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(json),
       });
-      const j = (await r.json().catch(() => null)) as any;
+      const j = (await r.json().catch(() => null)) as MutationResponse | null;
       if (!r.ok) throw new Error(j?.error || "import failed");
       setInfo("インポートしました。");
       await fetchAll();

@@ -19,10 +19,8 @@ function useReducedMotion(): boolean {
       return () => mql.removeEventListener("change", update);
     } catch {
       // Safari old API
-      // eslint-disable-next-line deprecation/deprecation
       mql.addListener?.(update);
       return () => {
-        // eslint-disable-next-line deprecation/deprecation
         mql.removeListener?.(update);
       };
     }
@@ -272,21 +270,17 @@ export default function EntryDanmakuWebGL() {
     let freeTop = MAX;
     for (let i = 0; i < MAX; i++) free[i] = i;
 
-    let alive = 0;
-
     function alloc(): number {
       if (freeTop <= 0) return -1;
       freeTop--;
       const idx = free[freeTop]!;
       active[idx] = 1;
-      alive++;
       return idx;
     }
 
     function kill(i: number) {
       if (!active[i]) return;
       active[i] = 0;
-      alive--;
       free[freeTop] = i;
       freeTop++;
     }

@@ -18,8 +18,8 @@ export default function InViewFade({
     if (!ref.current) return;
 
     if (!reverse) {
-      setVisible(true);
-      return;
+      const timer = window.setTimeout(() => setVisible(true), 0);
+      return () => window.clearTimeout(timer);
     }
 
     const observer = new IntersectionObserver(

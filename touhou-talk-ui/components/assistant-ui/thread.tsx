@@ -543,11 +543,14 @@ const VoiceInputButton: FC = () => {
       if (composed) aui.composer().setText(composed);
     };
 
+    let failTimer: number | null = null;
     try {
       recognition.start();
     } catch {
-      setEnabled(false);
-      setListening(false);
+      failTimer = window.setTimeout(() => {
+        setEnabled(false);
+        setListening(false);
+      }, 0);
       recognitionRef.current = null;
     }
 
@@ -557,6 +560,7 @@ const VoiceInputButton: FC = () => {
       } catch {
         // ignore
       }
+      if (failTimer != null) window.clearTimeout(failTimer);
       recognitionRef.current = null;
       setListening(false);
     };

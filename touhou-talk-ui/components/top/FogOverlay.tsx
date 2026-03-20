@@ -13,14 +13,20 @@ export default function FogOverlay({ visible, autoHideMs = 900, fadeMs = 650 }: 
   const [hiding, setHiding] = useState<boolean>(false);
 
   useEffect(() => {
-    if (!visible) {
-      setShow(false);
+    const updateId = window.setTimeout(() => {
+      if (!visible) {
+        setShow(false);
+        setHiding(false);
+        return;
+      }
+
+      setShow(true);
       setHiding(false);
+    }, 0);
+
+    if (!visible) {
       return;
     }
-
-    setShow(true);
-    setHiding(false);
 
     const t1 = window.setTimeout(() => setHiding(true), Math.max(0, autoHideMs));
     const t2 = window.setTimeout(
@@ -29,6 +35,7 @@ export default function FogOverlay({ visible, autoHideMs = 900, fadeMs = 650 }: 
     );
 
     return () => {
+      window.clearTimeout(updateId);
       window.clearTimeout(t1);
       window.clearTimeout(t2);
     };

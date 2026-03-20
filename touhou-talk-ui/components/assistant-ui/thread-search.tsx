@@ -86,6 +86,12 @@ export function ThreadSearch(props: { activeSessionId: string | null }) {
   const [hitIndex, setHitIndex] = useState(0);
   const hitsRef = useRef<Hit[]>([]);
 
+  const clearHits = useCallback(() => {
+    hitsRef.current = [];
+    setHitCount(0);
+    setHitIndex(0);
+  }, []);
+
   const hasSession = Boolean(activeSessionId);
 
   const counterLabel = useMemo(() => {
@@ -98,9 +104,7 @@ export function ThreadSearch(props: { activeSessionId: string | null }) {
   const recomputeHits = useCallback(
     (q: string) => {
       if (!hasSession) {
-        hitsRef.current = [];
-        setHitCount(0);
-        setHitIndex(0);
+        clearHits();
         return;
       }
 
@@ -112,7 +116,7 @@ export function ThreadSearch(props: { activeSessionId: string | null }) {
         return Math.min(Math.max(prev, 0), hits.length - 1);
       });
     },
-    [hasSession],
+    [clearHits, hasSession],
   );
 
   const resizeTextarea = useCallback(() => {
@@ -125,25 +129,24 @@ export function ThreadSearch(props: { activeSessionId: string | null }) {
 
   // Reset on session switch.
   useEffect(() => {
-    setQuery("");
-    hitsRef.current = [];
-    setHitCount(0);
-    setHitIndex(0);
-    setOpen(false);
-  }, [activeSessionId]);
+    const resetId = window.setTimeout(() => {
+      setQuery("");
+      clearHits();
+      setOpen(false);
+    }, 0);
+    return () => window.clearTimeout(resetId);
+  }, [activeSessionId, clearHits]);
 
   // Debounced search
   useEffect(() => {
     if (!query.trim()) {
-      hitsRef.current = [];
-      setHitCount(0);
-      setHitIndex(0);
-      return;
+      const resetId = window.setTimeout(() => clearHits(), 0);
+      return () => window.clearTimeout(resetId);
     }
 
     const handle = window.setTimeout(() => recomputeHits(query), 150);
     return () => window.clearTimeout(handle);
-  }, [query, recomputeHits]);
+  }, [query, recomputeHits, clearHits]);
 
   // Auto-resize the textarea while open.
   useEffect(() => {
@@ -282,13 +285,11 @@ export function ThreadSearch(props: { activeSessionId: string | null }) {
                 variant="ghost"
                 size="icon-sm"
                 className="shrink-0 rounded-full"
-                onClick={() => {
-                  setQuery("");
-                  setHitCount(0);
-                  setHitIndex(0);
-                  hitsRef.current = [];
-                  textareaRef.current?.focus();
-                }}
+                  onClick={() => {
+                    setQuery("");
+                    clearHits();
+                    textareaRef.current?.focus();
+                  }}
                 aria-label="検索をクリア"
               >
                 <XIcon className="size-4" />

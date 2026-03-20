@@ -1,6 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AssistantRuntimeProvider,
@@ -24,6 +25,8 @@ export default function AvatarClient() {
   const enabled = useMemo(() => isElectronUa(), []);
   const [hovered, setHovered] = useState(false);
   const hideTimerRef = useRef<number | null>(null);
+  const dragStyle = useMemo<CSSProperties>(() => ({ WebkitAppRegion: "drag" }), []);
+  const noDragStyle = useMemo<CSSProperties>(() => ({ WebkitAppRegion: "no-drag" }), []);
 
   useEffect(() => {
     // Make the page background fully transparent for the frameless window.
@@ -47,14 +50,6 @@ export default function AvatarClient() {
       body.className = prevBodyClass;
     };
   }, []);
-
-  if (!enabled) {
-    return (
-      <div className="flex h-dvh w-full items-center justify-center text-sm text-muted-foreground">
-        Desktop avatar window is only available in the Electron app.
-      </div>
-    );
-  }
 
   const store = useMemo<ExternalStoreAdapter>(
     () => ({
@@ -110,6 +105,14 @@ export default function AvatarClient() {
     }
   }, []);
 
+  if (!enabled) {
+    return (
+      <div className="flex h-dvh w-full items-center justify-center text-sm text-muted-foreground">
+        Desktop avatar window is only available in the Electron app.
+      </div>
+    );
+  }
+
   return (
     <div
       className="relative h-dvh w-full overflow-hidden bg-transparent"
@@ -134,14 +137,14 @@ export default function AvatarClient() {
         {/* Controls */}
         <div
           className="mx-auto mt-2 flex h-9 w-[calc(100%-16px)] max-w-[520px] items-center gap-1 rounded-full border border-border/60 bg-background/35 px-2 text-xs text-foreground/80 shadow-sm backdrop-blur transition-opacity"
-          style={{ ...( { WebkitAppRegion: "drag" } as any), opacity: hovered ? 1 : 0 }}
+          style={{ ...dragStyle, opacity: hovered ? 1 : 0 }}
         >
           <div className="flex min-w-0 items-center gap-1 truncate px-1">
             <GripHorizontalIcon className="size-4 opacity-80" />
             <span>ドラッグで移動 / リサイズ</span>
           </div>
 
-          <div className="ml-auto flex items-center gap-1" style={{ WebkitAppRegion: "no-drag" } as any}>
+          <div className="ml-auto flex items-center gap-1" style={noDragStyle}>
             <button
               type="button"
               className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-background/40 hover:bg-background/60"

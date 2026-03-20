@@ -664,15 +664,14 @@ export function useAquesTalkAudioTts() {
         });
       } catch (e) {
         // Fallback: HTMLAudio playback (some environments fail decoding WAV).
-        const a = audioRef.current ?? new Audio();
-        audioRef.current = a;
         cleanupUrl();
 
         const blob = new Blob([wavBytes], { type: "audio/wav" });
         const url = URL.createObjectURL(blob);
         objectUrlRef.current = url;
-        a.src = url;
-        a.preload = "auto";
+        const audio = new Audio(url);
+        audio.preload = "auto";
+        audioRef.current = audio;
 
         const dur = estimateWavDurationSec(wavBytes) ?? 0;
         playDurationRef.current = dur;
@@ -684,7 +683,7 @@ export function useAquesTalkAudioTts() {
           // ignore
         }
 
-        a.onplay = () => {
+        audio.onplay = () => {
           setSpeaking(true);
           startLevelRaf();
         };
@@ -697,12 +696,12 @@ export function useAquesTalkAudioTts() {
           stopLevelRaf();
           cleanupUrl();
         };
-        a.onended = end;
-        a.onerror = end;
-        a.onpause = () => setSpeaking(false);
+        audio.onended = end;
+        audio.onerror = end;
+        audio.onpause = () => setSpeaking(false);
 
         try {
-          await a.play();
+          await audio.play();
         } catch (err) {
           const reason =
             err instanceof Error ? err.message : "HTMLAudio play failed (autoplay policy?)";

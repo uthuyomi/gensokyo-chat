@@ -2,6 +2,7 @@
 
 import React from "react";
 import { useRouter } from "next/navigation";
+import type { SignInWithOAuthCredentials } from "@supabase/supabase-js";
 import { supabaseBrowser } from "@/lib/supabaseClient";
 import TopShell from "@/components/top/TopShell";
 import { SiDiscord, SiGithub, SiGoogle } from "react-icons/si";
@@ -64,14 +65,14 @@ export default function LoginClient(props: {
     return () => {
       canceled = true;
     };
-  }, [nextSafe, router]);
+  }, [nextOrChat, router]);
 
   async function signInWithOAuth(provider: Provider) {
     if (loadingProvider) return;
     setError(null);
     setLoadingProvider(provider);
 
-    const options: Record<string, any> = {
+    const options: SignInWithOAuthCredentials["options"] = {
       redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextOrChat)}`,
     };
     if (provider === "google") {
