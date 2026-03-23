@@ -1,0 +1,779 @@
+{
+  "characters": [
+    {
+      "id": "akyuu",
+      "name_ja": "稗田阿求",
+      "title_ja": "語り部"
+    },
+    {
+      "id": "alice",
+      "name_ja": "アリス・マーガトロイド",
+      "title_ja": "七色の人形遣い"
+    },
+    {
+      "id": "aunn",
+      "name_ja": "コマノ・アウン",
+      "title_ja": "狛犬の守護者"
+    },
+    {
+      "id": "aya",
+      "name_ja": "射命丸文",
+      "title_ja": "伝統の幻想ブン屋"
+    },
+    {
+      "id": "benben",
+      "name_ja": "ベンベン・ツクモ",
+      "title_ja": "琵琶の付喪神"
+    },
+    {
+      "id": "biten",
+      "name_ja": "ソン・ビテン",
+      "title_ja": "猿の武者"
+    },
+    {
+      "id": "byakuren",
+      "name_ja": "比那名居天子",
+      "title_ja": "仏教の聖者"
+    },
+    {
+      "id": "chen",
+      "name_ja": "橙",
+      "title_ja": "式神の猫"
+    },
+    {
+      "id": "chimata",
+      "name_ja": "千万年居士（チマタ）",
+      "title_ja": "市場の神"
+    },
+    {
+      "id": "chiyari",
+      "name_ja": "チヤリ・テンカジン",
+      "title_ja": "血洞の仲間"
+    },
+    {
+      "id": "cirno",
+      "name_ja": "チルノ",
+      "title_ja": "氷の妖精"
+    },
+    {
+      "id": "clownpiece",
+      "name_ja": "クラウンピース",
+      "title_ja": "地獄の妖精"
+    },
+    {
+      "id": "doremy",
+      "name_ja": "ドレミー・スイート",
+      "title_ja": "夢の番人"
+    },
+    {
+      "id": "eika",
+      "name_ja": "惠佳（エイカ）",
+      "title_ja": "石積みの精"
+    },
+    {
+      "id": "eiki",
+      "name_ja": "四季映姫・ヤマザナドゥ",
+      "title_ja": "楽園の最高裁判長"
+    },
+    {
+      "id": "eirin",
+      "name_ja": "八意永琳",
+      "title_ja": "月の頭脳"
+    },
+    {
+      "id": "enoko",
+      "name_ja": "エノコ・ミツガシラ",
+      "title_ja": "狼狩りの長"
+    },
+    {
+      "id": "eternity",
+      "name_ja": "エタニティ・ラーヴァ",
+      "title_ja": "夏の蝶の妖精"
+    },
+    {
+      "id": "flandre",
+      "name_ja": "フランドール・スカーレット",
+      "title_ja": "紅魔館のもう一人の主"
+    },
+    {
+      "id": "futo",
+      "name_ja": "物部布都",
+      "title_ja": "古の道士"
+    },
+    {
+      "id": "hatate",
+      "name_ja": "姫海棠はたて",
+      "title_ja": "天狗の情報屋"
+    },
+    {
+      "id": "hecatia",
+      "name_ja": "ヘカーティア・ラピスラズリ",
+      "title_ja": "多元世界の女神"
+    },
+    {
+      "id": "hina",
+      "name_ja": "鍵山雛",
+      "title_ja": "厄の女神"
+    },
+    {
+      "id": "hisami",
+      "name_ja": "ヒサミ・ヨモツ",
+      "title_ja": "大地の忠犬"
+    },
+    {
+      "id": "ichirin",
+      "name_ja": "一輪（雲居一輪）",
+      "title_ja": "入道を従えた弟子"
+    },
+    {
+      "id": "iku",
+      "name_ja": "永江衣玖",
+      "title_ja": "天の使者"
+    },
+    {
+      "id": "joon",
+      "name_ja": "ジョーン・ヨリガミ",
+      "title_ja": "疫神（疱瘡の女神）"
+    },
+    {
+      "id": "junko",
+      "name_ja": "純狐",
+      "title_ja": "純粋なる激怒"
+    },
+    {
+      "id": "kagerou",
+      "name_ja": "今泉影狼",
+      "title_ja": "竹林の狼人"
+    },
+    {
+      "id": "kaguya",
+      "name_ja": "蓬莱山輝夜",
+      "title_ja": "永遠の姫君"
+    },
+    {
+      "id": "kanako",
+      "name_ja": "八坂神奈子",
+      "title_ja": "山と川の権化"
+    },
+    {
+      "id": "kasen",
+      "name_ja": "伊吹萃香",
+      "title_ja": "隠者の助言者"
+    },
+    {
+      "id": "keiki",
+      "name_ja": "恵曇（ヘイキ）",
+      "title_ja": "造物の神"
+    },
+    {
+      "id": "keine",
+      "name_ja": "上白沢慧音",
+      "title_ja": "歴史を喰らう半獣"
+    },
+    {
+      "id": "kisume",
+      "name_ja": "キスメ",
+      "title_ja": "井戸の付喪天狗"
+    },
+    {
+      "id": "kogasa",
+      "name_ja": "多々良小傘",
+      "title_ja": "傘化け"
+    },
+    {
+      "id": "koishi",
+      "name_ja": "古明地こいし",
+      "title_ja": "閉じた恋の瞳"
+    },
+    {
+      "id": "kokoro",
+      "name_ja": "秦こころ",
+      "title_ja": "面の妖怪"
+    },
+    {
+      "id": "komachi",
+      "name_ja": "小野塚小町",
+      "title_ja": "三途の水先案内人"
+    },
+    {
+      "id": "kosuzu",
+      "name_ja": "諸鈴元織",
+      "title_ja": "書物の管理人"
+    },
+    {
+      "id": "kutaka",
+      "name_ja": "二羽鴎 クタカ",
+      "title_ja": "関所の神"
+    },
+    {
+      "id": "kyouko",
+      "name_ja": "加曽利香子",
+      "title_ja": "山彦の修験者"
+    },
+    {
+      "id": "letty",
+      "name_ja": "レティ・ホワイトロック",
+      "title_ja": "冬の妖怪"
+    },
+    {
+      "id": "lily_white",
+      "name_ja": "リリィ・ホワイト",
+      "title_ja": "春の妖精"
+    },
+    {
+      "id": "luna_child",
+      "name_ja": "ルナチャイルド",
+      "title_ja": "沈黙の妖精"
+    },
+    {
+      "id": "lunasa",
+      "name_ja": "ルナサ・プリズムリバー",
+      "title_ja": "幻のヴァイオリニスト"
+    },
+    {
+      "id": "lyrica",
+      "name_ja": "リリカ・プリズムリバー",
+      "title_ja": "幻の鍵盤奏者"
+    },
+    {
+      "id": "mai",
+      "name_ja": "舞（テイレイダ舞）",
+      "title_ja": "裏口の踊り手"
+    },
+    {
+      "id": "mamizou",
+      "name_ja": "二ツ岩マミゾウ",
+      "title_ja": "化け狸の長老"
+    },
+    {
+      "id": "marisa",
+      "name_ja": "霧雨魔理沙",
+      "title_ja": "普通の魔法使い"
+    },
+    {
+      "id": "mayumi",
+      "name_ja": "壬生五月",
+      "title_ja": "埴輪の兵士"
+    },
+    {
+      "id": "medicine",
+      "name_ja": "メディスン・メランコリー",
+      "title_ja": "毒の人形"
+    },
+    {
+      "id": "megumu",
+      "name_ja": "飯綱丸めぐむ",
+      "title_ja": "大天狗の長"
+    },
+    {
+      "id": "meiling",
+      "name_ja": "紅美鈴",
+      "title_ja": "中華風の小娘"
+    },
+    {
+      "id": "merlin",
+      "name_ja": "マーリン・プリズムリバー",
+      "title_ja": "幻のトランぺッター"
+    },
+    {
+      "id": "mike",
+      "name_ja": "マイケ・ゴウトクジ",
+      "title_ja": "招き白猫"
+    },
+    {
+      "id": "miko",
+      "name_ja": "豊聡耳命（豊聡耳）／豊聡耳の巫女",
+      "title_ja": "聖なる指導者"
+    },
+    {
+      "id": "minoriko",
+      "name_ja": "秋穣子",
+      "title_ja": "収穫の女神"
+    },
+    {
+      "id": "misumaru",
+      "name_ja": "三浦ミスマル",
+      "title_ja": "玉作りの名手"
+    },
+    {
+      "id": "miyoi",
+      "name_ja": "奥野田美宵",
+      "title_ja": "芸灯亭の看板娘"
+    },
+    {
+      "id": "mizuchi",
+      "name_ja": "ミズチ・ミヤデグチ",
+      "title_ja": "潜む怨霊"
+    },
+    {
+      "id": "mokou",
+      "name_ja": "藤原妹紅",
+      "title_ja": "不死の人間"
+    },
+    {
+      "id": "momiji",
+      "name_ja": "犬走椛",
+      "title_ja": "山の天狗の見張り番"
+    },
+    {
+      "id": "momoyo",
+      "name_ja": "姫虫百々世",
+      "title_ja": "百足の坑夫"
+    },
+    {
+      "id": "murasa",
+      "name_ja": "南無津むらさ",
+      "title_ja": "御輿の船長"
+    },
+    {
+      "id": "mystia",
+      "name_ja": "ミスティア・ローレライ",
+      "title_ja": "夜雀"
+    },
+    {
+      "id": "narumi",
+      "name_ja": "矢田寺成美",
+      "title_ja": "地蔵の魔術師"
+    },
+    {
+      "id": "nazrin",
+      "name_ja": "ナズーリン",
+      "title_ja": "巫術の探り手（探知鼠）"
+    },
+    {
+      "id": "nemuno",
+      "name_ja": "坂田寧々（ネムノ）",
+      "title_ja": "山の老婆"
+    },
+    {
+      "id": "nitori",
+      "name_ja": "河城にとり",
+      "title_ja": "河童の発明家"
+    },
+    {
+      "id": "nue",
+      "name_ja": "封獣ぬえ",
+      "title_ja": "正体不明の妖怪"
+    },
+    {
+      "id": "okina",
+      "name_ja": "マタラ・オキナ",
+      "title_ja": "秘神"
+    },
+    {
+      "id": "parsee",
+      "name_ja": "水橋パルスィ",
+      "title_ja": "嫉妬深い橋姫"
+    },
+    {
+      "id": "patchouli",
+      "name_ja": "パチュリー・ノーレッジ",
+      "title_ja": "知識と日陰の少女"
+    },
+    {
+      "id": "raiko",
+      "name_ja": "堀川雷鼓",
+      "title_ja": "太鼓の付喪神"
+    },
+    {
+      "id": "ran",
+      "name_ja": "八雲藍",
+      "title_ja": "式神の八尾の狐"
+    },
+    {
+      "id": "reimu",
+      "name_ja": "博麗霊夢",
+      "title_ja": "楽園の巫女"
+    },
+    {
+      "id": "reisen",
+      "name_ja": "鈴仙・優曇華院・イナバ",
+      "title_ja": "月の兎"
+    },
+    {
+      "id": "remilia",
+      "name_ja": "レミリア・スカーレット",
+      "title_ja": "永遠に紅い幼き月"
+    },
+    {
+      "id": "rin",
+      "name_ja": "火焔猫燐",
+      "title_ja": "お燐"
+    },
+    {
+      "id": "ringo",
+      "name_ja": "リンゴ（リング）",
+      "title_ja": "団子売りの兎"
+    },
+    {
+      "id": "rinnosuke",
+      "name_ja": "森近霖之助",
+      "title_ja": "古物商"
+    },
+    {
+      "id": "rumia",
+      "name_ja": "ルーミア",
+      "title_ja": "闇の妖怪"
+    },
+    {
+      "id": "sagume",
+      "name_ja": "鍵山さぐめ",
+      "title_ja": "月の策士"
+    },
+    {
+      "id": "saki",
+      "name_ja": "黒駒咲姫",
+      "title_ja": "景賀一族の頭領"
+    },
+    {
+      "id": "sakuya",
+      "name_ja": "十六夜咲夜",
+      "title_ja": "紅魔館のメイド"
+    },
+    {
+      "id": "sanae",
+      "name_ja": "東風谷早苗",
+      "title_ja": "現代の巫女（風祝）"
+    },
+    {
+      "id": "sannyo",
+      "name_ja": "コマクサ・サンニョ",
+      "title_ja": "煙売り"
+    },
+    {
+      "id": "satono",
+      "name_ja": "西田里乃（サトノ）",
+      "title_ja": "裏口の踊り手"
+    },
+    {
+      "id": "satori",
+      "name_ja": "古明地さとり",
+      "title_ja": "地霊殿の主"
+    },
+    {
+      "id": "seiga",
+      "name_ja": "霍青娥（カク・セイガ）",
+      "title_ja": "邪悪な隠者"
+    },
+    {
+      "id": "seija",
+      "name_ja": "鬼人正邪",
+      "title_ja": "天邪鬼の反逆者"
+    },
+    {
+      "id": "seiran",
+      "name_ja": "セイラン",
+      "title_ja": "月の兎兵士"
+    },
+    {
+      "id": "sekibanki",
+      "name_ja": "赤蛮奇（せきばんき）",
+      "title_ja": "轆轤首の妖怪"
+    },
+    {
+      "id": "shinmyoumaru",
+      "name_ja": "少名針妙丸",
+      "title_ja": "一寸法師の姫"
+    },
+    {
+      "id": "shion",
+      "name_ja": "依神紫苑",
+      "title_ja": "貧乏神"
+    },
+    {
+      "id": "shizuha",
+      "name_ja": "秋静葉",
+      "title_ja": "秋の女神"
+    },
+    {
+      "id": "shou",
+      "name_ja": "寅丸雛（とらまるしょう）",
+      "title_ja": "毘沙門天の化身"
+    },
+    {
+      "id": "star_sapphire",
+      "name_ja": "スターメイル（スターサファイア）",
+      "title_ja": "星明かりの妖精"
+    },
+    {
+      "id": "suika",
+      "name_ja": "伊吹萃香",
+      "title_ja": "百鬼夜行の小隊長"
+    },
+    {
+      "id": "sumireko",
+      "name_ja": "宇佐見菫子",
+      "title_ja": "オカルトの外部者"
+    },
+    {
+      "id": "sunny_milk",
+      "name_ja": "サニーミルク",
+      "title_ja": "日差しの妖精"
+    },
+    {
+      "id": "suwako",
+      "name_ja": "洩矢諏訪子",
+      "title_ja": "土着神の長"
+    },
+    {
+      "id": "takane",
+      "name_ja": "山城たかね",
+      "title_ja": "山童の仲介者"
+    },
+    {
+      "id": "tenshi",
+      "name_ja": "比那名居天子",
+      "title_ja": "わがままな天人"
+    },
+    {
+      "id": "tewi",
+      "name_ja": "因幡てゐ",
+      "title_ja": "幸運の白兎"
+    },
+    {
+      "id": "tojiko",
+      "name_ja": "東風谷とうじこ",
+      "title_ja": "嵐の精"
+    },
+    {
+      "id": "toyohime",
+      "name_ja": "月読豊姫（ワタツキの豊姫）",
+      "title_ja": "月の貴族"
+    },
+    {
+      "id": "tsukasa",
+      "name_ja": "砕流司（ツカサ）",
+      "title_ja": "煙管狐の操り手"
+    },
+    {
+      "id": "urumi",
+      "name_ja": "牛崎うるみ",
+      "title_ja": "地獄の牛守り"
+    },
+    {
+      "id": "utsuho",
+      "name_ja": "霊烏路空（宇都子）",
+      "title_ja": "地獄の烏"
+    },
+    {
+      "id": "wakasagihime",
+      "name_ja": "若狭姫",
+      "title_ja": "輝く湖の人魚"
+    },
+    {
+      "id": "wriggle",
+      "name_ja": "リグル・ナイトバグ",
+      "title_ja": "蛍の妖怪"
+    },
+    {
+      "id": "yachie",
+      "name_ja": "橘谷八千絵",
+      "title_ja": "亀の老女頭"
+    },
+    {
+      "id": "yamame",
+      "name_ja": "黒谷ヤマメ",
+      "title_ja": "土蜘蛛の妖怪"
+    },
+    {
+      "id": "yatsuhashi",
+      "name_ja": "八橋八橋（やつはしつくも）",
+      "title_ja": "琴の付喪神"
+    },
+    {
+      "id": "yorihime",
+      "name_ja": "月読依姫（ワタツキの依姫）",
+      "title_ja": "月の貴族・召喚師"
+    },
+    {
+      "id": "yoshika",
+      "name_ja": "ミヤコ・ヨシカ",
+      "title_ja": "従順な屍者（僵尸）"
+    },
+    {
+      "id": "youmu",
+      "name_ja": "魂魄妖夢",
+      "title_ja": "半人半霊の庭師"
+    },
+    {
+      "id": "yukari",
+      "name_ja": "八雲紫",
+      "title_ja": "境界の妖怪"
+    },
+    {
+      "id": "yuugi",
+      "name_ja": "星熊勇儀",
+      "title_ja": "鬼の豪傑"
+    },
+    {
+      "id": "yuuka",
+      "name_ja": "風見幽香",
+      "title_ja": "花の支配者"
+    },
+    {
+      "id": "yuuma",
+      "name_ja": "ユーマ・トウテツ",
+      "title_ja": "強欲の化身"
+    },
+    {
+      "id": "yuyuko",
+      "name_ja": "西行寺幽々子",
+      "title_ja": "夢幻の亡霊"
+    },
+    {
+      "id": "zanmu",
+      "name_ja": "ザンム・ニッパク",
+      "title_ja": "虚無の王"
+    }
+  ],
+  "locations": [
+    {
+      "id": "backdoor_realm",
+      "name_ja": "裏口の領域"
+    },
+    {
+      "id": "bamboo_forest",
+      "name_ja": "迷いの竹林"
+    },
+    {
+      "id": "bamboo_path",
+      "name_ja": "竹林の小径"
+    },
+    {
+      "id": "beast_realm",
+      "name_ja": "獣の国"
+    },
+    {
+      "id": "bhavaagra",
+      "name_ja": "ババーワーグラ（Bhavaagra）"
+    },
+    {
+      "id": "blood_pool_hell",
+      "name_ja": "血の池地獄"
+    },
+    {
+      "id": "chireiden",
+      "name_ja": "地霊殿"
+    },
+    {
+      "id": "divine_spirit_mausoleum",
+      "name_ja": "神霊廟"
+    },
+    {
+      "id": "dream_world",
+      "name_ja": "夢の世界"
+    },
+    {
+      "id": "eientei",
+      "name_ja": "永遠亭"
+    },
+    {
+      "id": "forest_of_magic",
+      "name_ja": "魔法の森"
+    },
+    {
+      "id": "former_hell",
+      "name_ja": "旧地獄"
+    },
+    {
+      "id": "genbu_ravine",
+      "name_ja": "玄武渓谷"
+    },
+    {
+      "id": "hakugyokurou",
+      "name_ja": "白玉楼"
+    },
+    {
+      "id": "hakurei_shrine",
+      "name_ja": "博麗神社"
+    },
+    {
+      "id": "heaven",
+      "name_ja": "天界"
+    },
+    {
+      "id": "human_village",
+      "name_ja": "人里"
+    },
+    {
+      "id": "kappa_workshop",
+      "name_ja": "河童工房"
+    },
+    {
+      "id": "kourindou",
+      "name_ja": "香霖堂"
+    },
+    {
+      "id": "lunar_capital",
+      "name_ja": "月の都"
+    },
+    {
+      "id": "mansion_library",
+      "name_ja": "紅魔館図書室"
+    },
+    {
+      "id": "misty_lake",
+      "name_ja": "霞の湖"
+    },
+    {
+      "id": "moriya_shrine",
+      "name_ja": "洩矢神社"
+    },
+    {
+      "id": "moriya_upper_precinct",
+      "name_ja": "洩矢神社・上社"
+    },
+    {
+      "id": "muenzuka",
+      "name_ja": "無縁塚"
+    },
+    {
+      "id": "myouren_temple",
+      "name_ja": "妙蓮寺"
+    },
+    {
+      "id": "nameless_hill",
+      "name_ja": "名もなき丘"
+    },
+    {
+      "id": "netherworld",
+      "name_ja": "冥界"
+    },
+    {
+      "id": "old_capital",
+      "name_ja": "旧都（旧市街地）"
+    },
+    {
+      "id": "rainbow_dragon_cave",
+      "name_ja": "虹龍洞"
+    },
+    {
+      "id": "sanzu_river",
+      "name_ja": "三途の川"
+    },
+    {
+      "id": "scarlet_devil_mansion",
+      "name_ja": "紅魔館"
+    },
+    {
+      "id": "scarlet_gate",
+      "name_ja": "紅魔館門"
+    },
+    {
+      "id": "senkai",
+      "name_ja": "仙界（Senkai）"
+    },
+    {
+      "id": "shining_needle_castle",
+      "name_ja": "光針城"
+    },
+    {
+      "id": "suzunaan",
+      "name_ja": "鈴奈庵（蘇州の店）"
+    },
+    {
+      "id": "youkai_mountain_foot",
+      "name_ja": "妖怪山麓"
+    }
+  ]
+}

@@ -25,8 +25,8 @@ The server best-effort loads the repo root `.env` (without overwriting shell env
 
 Required:
 
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+- `WORLD_SUPABASE_URL` or `SUPABASE_URL`
+- `WORLD_SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_ROLE_KEY`
 
 Optional hardening:
 
@@ -35,6 +35,10 @@ Optional hardening:
 Optional port:
 
 - `GENSOKYO_WORLD_ENGINE_PORT` (default: `8010`)
+- `OPENAI_API_KEY` (when running the embedding worker)
+- `WORLD_EMBEDDING_MODEL` (default: `text-embedding-3-small`)
+- `WORLD_EMBEDDING_BATCH_SIZE` (default: `32`)
+- `WORLD_EMBEDDING_JOB_LIMIT` (default: `128`)
 
 ### 3) Install deps & start
 
@@ -76,3 +80,20 @@ Time skip generation reads repo-local JSON:
 - `gensokyo-world-engine/content/events.json`
 - `gensokyo-world-engine/content/relationships.json`
 
+## World embeddings
+
+When the Supabase world schema includes the vector layer:
+
+- `supabase/world/WORLD_SCHEMA_VECTOR.sql`
+- `supabase/world/WORLD_SEED_VECTOR_BOOTSTRAP.sql`
+
+you can queue searchable world documents and embed them with:
+
+```powershell
+cd gensokyo-world-engine
+./.venv/Scripts/python tools/world_embedding_worker.py --preview 5
+./.venv/Scripts/python tools/world_embedding_worker.py
+```
+
+This reads pending rows from `world_embedding_jobs`, generates embeddings for
+`world_embedding_documents`, and stores them in `world_embeddings`.
