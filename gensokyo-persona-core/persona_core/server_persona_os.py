@@ -22,9 +22,11 @@ import json
 import time
 import uuid
 import hashlib
+import base64
 import sys
 import asyncio
 import re
+import threading
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
@@ -122,7 +124,7 @@ def _sha256_json(obj: Any) -> str:
 
 
 def _io_cache_enabled() -> bool:
-    return os.getenv("SIGMARIS_IO_CACHE_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.getenv("SIGMARIS_IO_CACHE_ENABLED", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _io_cache_ttl_sec() -> int:
@@ -203,12 +205,12 @@ _state_load_workers = int(os.getenv("SIGMARIS_STATE_LOAD_WORKERS", "6") or "6")
 _state_load_workers = max(2, min(32, _state_load_workers))
 _STATE_LOAD_POOL: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=_state_load_workers)
 
-_state_cache_ttl_sec = float(os.getenv("SIGMARIS_STATE_CACHE_TTL_SEC", "0") or "0")
+_state_cache_ttl_sec = float(os.getenv("SIGMARIS_STATE_CACHE_TTL_SEC", "15") or "15")
 _state_cache_max = int(os.getenv("SIGMARIS_STATE_CACHE_MAX", "256") or "256")
 _state_cache_max = max(0, min(5000, _state_cache_max))
 _state_cache: Dict[str, Dict[str, Any]] = {}  # user_id -> {"ts": float, ...payload}
 
-_auth_cache_ttl_sec = float(os.getenv("SIGMARIS_AUTH_CACHE_TTL_SEC", "0") or "0")
+_auth_cache_ttl_sec = float(os.getenv("SIGMARIS_AUTH_CACHE_TTL_SEC", "60") or "60")
 _auth_cache_max = int(os.getenv("SIGMARIS_AUTH_CACHE_MAX", "1024") or "1024")
 _auth_cache_max = max(0, min(10000, _auth_cache_max))
 _auth_cache: Dict[str, Dict[str, Any]] = {}  # token_hash -> {"ts": float, "ctx": AuthContext}
@@ -608,6 +610,7 @@ class ChatRequest(BaseModel):
 
     # Phase04: attachment metadata references (bytes are uploaded separately)
     attachments: Optional[List[Dict[str, Any]]] = None
+    tool_policy: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
     def _require_message_or_messages(self) -> "ChatRequest":
@@ -616,6 +619,252 @@ class ChatRequest(BaseModel):
         if not has_message and not has_messages:
             raise ValueError("Either `message` or `messages` is required")
         return self
+
+
+def _tool_policy_dict(raw: Any) -> Dict[str, Any]:
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+def _tool_policy_allows_web_search(policy: Any) -> bool:
+    p = _tool_policy_dict(policy)
+    if not p:
+        return True
+    return bool(p.get("allow_web_search", True))
+
+
+def _tool_policy_web_search_mode(policy: Any) -> str:
+    p = _tool_policy_dict(policy)
+    mode = str(p.get("web_search_mode") or "auto").strip().lower()
+    if mode in ("off", "auto", "required"):
+        return mode
+    return "auto"
+
+
+def _merge_gen_with_tool_policy(gen: Any, policy: Any) -> Dict[str, Any]:
+    merged: Dict[str, Any] = dict(gen) if isinstance(gen, dict) else {}
+    policy_dict = _tool_policy_dict(policy)
+    multimodal = merged.get("multimodal") if isinstance(merged.get("multimodal"), dict) else {}
+    merged["multimodal"] = {
+        **multimodal,
+        "mode": str(policy_dict.get("attachment_mode") or multimodal.get("mode") or "context_only"),
+        "prefer_native_attachments": bool(policy_dict.get("prefer_native_attachments", True)),
+    }
+
+    web_mode = _tool_policy_web_search_mode(policy_dict)
+    web_rag = merged.get("web_rag") if isinstance(merged.get("web_rag"), dict) else {}
+    if web_mode == "off":
+        merged["web_rag"] = {**web_rag, "enabled": False, "mode": "off"}
+    elif web_mode == "required":
+        merged["web_rag"] = {**web_rag, "enabled": True, "mode": "required"}
+    else:
+        merged["web_rag"] = {**web_rag, "mode": "auto"}
+    return merged
+
+
+def _should_prefetch_web_rag(gen: Any) -> bool:
+    if not isinstance(gen, dict):
+        return True
+    multimodal = gen.get("multimodal")
+    if not isinstance(multimodal, dict):
+        return True
+    return str(multimodal.get("mode") or "context_only").strip().lower() != "sdk_first"
+
+
+def _should_use_native_attachments(gen: Any) -> bool:
+    if not isinstance(gen, dict):
+        return False
+    multimodal = gen.get("multimodal")
+    if not isinstance(multimodal, dict):
+        return False
+    return str(multimodal.get("mode") or "").strip().lower() == "sdk_first"
+
+
+def _native_attachment_max_items() -> int:
+    try:
+        n = int(os.getenv("SIGMARIS_NATIVE_ATTACHMENTS_MAX_ITEMS", "3") or "3")
+    except Exception:
+        n = 3
+    return max(0, min(6, n))
+
+
+def _native_attachment_max_bytes() -> int:
+    try:
+        n = int(os.getenv("SIGMARIS_NATIVE_ATTACHMENT_MAX_BYTES", "1500000") or "1500000")
+    except Exception:
+        n = 1500000
+    return max(1024, min(8_000_000, n))
+
+
+def _is_text_like_attachment(*, file_name: str, mime_type: str) -> bool:
+    mt = str(mime_type or "").strip().lower()
+    fn = str(file_name or "").strip().lower()
+    if mt.startswith("text/"):
+        return True
+    if mt in {
+        "application/json",
+        "application/javascript",
+        "application/xml",
+        "application/yaml",
+        "application/x-yaml",
+    }:
+        return True
+    return fn.endswith(
+        (
+            ".txt",
+            ".md",
+            ".py",
+            ".ts",
+            ".tsx",
+            ".js",
+            ".jsx",
+            ".json",
+            ".yml",
+            ".yaml",
+            ".xml",
+            ".html",
+            ".css",
+            ".csv",
+        )
+    )
+
+
+def _build_native_attachment_item(
+    *,
+    data: bytes,
+    file_name: str,
+    mime_type: str,
+    attachment_id: Optional[str] = None,
+    attachment_sha256: Optional[str] = None,
+    attachment_meta: Optional[Dict[str, Any]] = None,
+    size_bytes: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    mime = str(mime_type or "application/octet-stream").strip() or "application/octet-stream"
+    name = str(file_name or "attachment").strip() or "attachment"
+    base_meta: Dict[str, Any] = {
+        "file_name": name,
+        "mime_type": mime,
+        "attachment_id": str(attachment_id or "").strip() or None,
+        "attachment_sha256": str(attachment_sha256 or "").strip() or None,
+        "attachment_meta": attachment_meta if isinstance(attachment_meta, dict) else {},
+        "size_bytes": int(size_bytes) if isinstance(size_bytes, int) else int(len(data or b"")),
+    }
+    if mime.startswith("image/"):
+        b64 = base64.b64encode(data).decode("ascii")
+        return {
+            "type": "input_image",
+            "detail": "auto",
+            "image_url": f"data:{mime};base64,{b64}",
+            **base_meta,
+        }
+    if mime == "application/pdf" or _is_text_like_attachment(file_name=name, mime_type=mime):
+        return {
+            "type": "input_file",
+            "filename": name,
+            "file_data": base64.b64encode(data).decode("ascii"),
+            **base_meta,
+        }
+    return None
+
+
+def _load_attachment_bytes(
+    *,
+    attachment_id: str,
+    auth: Optional["AuthContext"],
+) -> tuple[bytes, Dict[str, Any]]:
+    if _supabase is not None and _storage is not None and auth is not None:
+        persona_db = SupabasePersonaDB(_supabase)
+        row = persona_db.load_attachment(attachment_id=str(attachment_id))
+        if not row:
+            raise RuntimeError("attachment not found")
+        owner = row.get("user_id")
+        if owner and str(owner) != str(auth.user_id):
+            raise RuntimeError("forbidden")
+        bucket_id = str(row.get("bucket_id") or _storage_bucket)
+        object_path = str(row.get("object_path") or "")
+        if not object_path:
+            raise RuntimeError("missing object_path")
+        data = _storage.download(bucket_id=bucket_id, object_path=object_path)
+        return data, row if isinstance(row, dict) else {}
+
+    base_dir = os.getenv("SIGMARIS_UPLOAD_DIR") or str(
+        Path(__file__).resolve().parents[2] / "data" / "uploads"
+    )
+    path = os.path.join(base_dir, str(attachment_id))
+    meta_path = path + ".json"
+    if not os.path.exists(path) or not os.path.isfile(path):
+        raise RuntimeError("attachment not found")
+    meta: Dict[str, Any] = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f) or {}
+        except Exception:
+            meta = {}
+    if _auth_required and auth is not None:
+        owner = meta.get("user_id")
+        if owner and str(owner) != str(auth.user_id):
+            raise RuntimeError("forbidden")
+    with open(path, "rb") as f:
+        return f.read(), meta
+
+
+def _resolve_native_attachments(
+    *,
+    attachments: Optional[List[Dict[str, Any]]],
+    auth: Optional["AuthContext"],
+) -> List[Dict[str, Any]]:
+    atts = attachments if isinstance(attachments, list) else []
+    if not atts:
+        return []
+
+    out: List[Dict[str, Any]] = []
+    max_items = _native_attachment_max_items()
+    max_bytes = _native_attachment_max_bytes()
+
+    for raw in atts[:max_items]:
+        if not isinstance(raw, dict):
+            continue
+        raw_type = _safe_str(raw.get("type") or "").strip().lower()
+        if raw_type == "link_analysis":
+            continue
+        attachment_id = _safe_str(raw.get("attachment_id") or "").strip()
+        if not attachment_id:
+            continue
+        try:
+            data, meta = _load_attachment_bytes(attachment_id=attachment_id, auth=auth)
+        except Exception:
+            continue
+        if not data or len(data) > max_bytes:
+            continue
+        file_name = _safe_str(raw.get("file_name") or raw.get("name") or meta.get("file_name") or "").strip() or attachment_id
+        mime_type = _safe_str(raw.get("mime_type") or meta.get("mime_type") or "").strip() or "application/octet-stream"
+        row_meta = meta.get("meta") if isinstance(meta.get("meta"), dict) else meta
+        item = _build_native_attachment_item(
+            data=data,
+            file_name=file_name,
+            mime_type=mime_type,
+            attachment_id=attachment_id,
+            attachment_sha256=_safe_str(meta.get("sha256") or "").strip() or None,
+            attachment_meta=row_meta if isinstance(row_meta, dict) else {},
+            size_bytes=int(meta.get("size_bytes")) if isinstance(meta.get("size_bytes"), int) else len(data),
+        )
+        if item:
+            out.append(item)
+
+    return out
+
+
+def _resolved_attachment_ids(native_attachments: Optional[List[Dict[str, Any]]]) -> set[str]:
+    out: set[str] = set()
+    if not isinstance(native_attachments, list):
+        return out
+    for item in native_attachments:
+        if not isinstance(item, dict):
+            continue
+        attachment_id = _safe_str(item.get("attachment_id") or "").strip()
+        if attachment_id:
+            out.add(attachment_id)
+    return out
 
 
 class ChatResponse(BaseModel):
@@ -1400,15 +1649,513 @@ def _merge_external_system(persona_system: Optional[str], system: Optional[str])
 
 
 def _web_rag_enabled() -> bool:
-    return os.getenv("SIGMARIS_WEB_RAG_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.getenv("SIGMARIS_WEB_RAG_ENABLED", "1").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _web_rag_auto_enabled() -> bool:
     return os.getenv("SIGMARIS_WEB_RAG_AUTO", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _defer_nonstream_persistence_enabled() -> bool:
+    raw = os.getenv("SIGMARIS_DEFER_PERSISTENCE_NON_STREAM", "1")
+    return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _defer_phase04_postprocess_enabled() -> bool:
+    raw = os.getenv("SIGMARIS_DEFER_PHASE04_POSTPROCESS", "1")
+    return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _defer_safety_audit_enabled() -> bool:
+    raw = os.getenv("SIGMARIS_DEFER_SAFETY_AUDIT", "1")
+    return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _lightweight_turns_enabled() -> bool:
+    raw = os.getenv("SIGMARIS_LIGHTWEIGHT_TURNS", "1")
+    return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+
+def _build_lightweight_system_prompt(
+    *,
+    external_system: Optional[str],
+    web_ctx: Optional[str],
+) -> str:
+    parts: List[str] = [
+        "You are a concise, helpful assistant.",
+        "Prefer a direct reply unless the user explicitly asks for depth.",
+    ]
+    if isinstance(external_system, str) and external_system.strip():
+        parts.append("# External Persona System\n" + external_system.strip())
+    if isinstance(web_ctx, str) and web_ctx.strip():
+        parts.append(
+            "# External Knowledge\n"
+            + web_ctx.strip()
+            + "\n\n# External Knowledge Rules\n"
+            + "- Use this context directly when relevant.\n"
+            + "- Do not claim you lack access when this block is present.\n"
+        )
+    return "\n\n".join(parts).strip()
+
+
+def _should_use_lightweight_turn(
+    *,
+    req: "ChatRequest",
+    intent: str,
+    effective_message: str,
+    web_ctx: Optional[str],
+    tool_weather: Optional[Dict[str, Any]],
+    tool_comparison: Optional[Dict[str, Any]],
+    personalization_hint: Optional[Dict[str, Any]],
+    safety_flag: Optional[str],
+) -> bool:
+    if not _lightweight_turns_enabled():
+        return False
+    intent_norm = str(intent or "").strip().lower()
+    chat_mode = str(getattr(req, "chat_mode", "") or "").strip().lower()
+    if intent_norm in ("realtime_fact", "personalized_realtime", "weather", "comparison"):
+        return False
+    if isinstance(web_ctx, str) and web_ctx.strip():
+        return False
+    if tool_weather or tool_comparison or personalization_hint:
+        return False
+    if safety_flag not in (None, ""):
+        return False
+    max_len = 6000 if chat_mode == "roleplay" else 4000
+    if len((effective_message or "").strip()) > max_len:
+        return False
+    return True
+
+
+def _lightweight_meta(
+    *,
+    trace_id: str,
+    t0: float,
+    intent: str,
+    safety: Any,
+    phase04_meta: Dict[str, Any],
+    reply_text: str,
+    lightweight_reason: str,
+) -> Dict[str, Any]:
+    base_v0 = _v0_defaults(trace_id)
+    meta: Dict[str, Any] = {
+        "meta_version": META_VERSION,
+        "engine_version": ENGINE_VERSION,
+        "build_sha": str(BUILD_SHA),
+        "config_hash": str(CONFIG_HASH),
+        "trace_id": trace_id,
+        "intent": {"primary": intent} if intent else {},
+        "intent_route": str(intent or "general"),
+        "dialogue_state": "LIGHTWEIGHT",
+        "telemetry": base_v0.get("telemetry") or {"C": 0.0, "N": 0.0, "M": 0.0, "S": 0.0, "R": 0.0},
+        "decision_candidates": [],
+        "timing_ms": int((time.time() - t0) * 1000),
+        "safety": {
+            "flag": getattr(safety, "safety_flag", None),
+            "risk_score": getattr(safety, "risk_score", 0.0),
+            "total_risk": float(getattr(safety, "risk_score", 0.0) or 0.0),
+            "override": False,
+            "categories": getattr(safety, "categories", {}) or {},
+            "reasons": getattr(safety, "reasons", []) or [],
+        },
+        "memory": {"lightweight": True},
+        "identity": {"lightweight": True},
+        "value": {"state": {}, "delta": {}},
+        "trait": {"state": {}, "delta": {}, "baseline": None, "baseline_delta": None},
+        "global_state": {"state": "LIGHTWEIGHT"},
+        "v0": {
+            **base_v0,
+            "intent": {"primary": intent} if intent else {},
+            "dialogue_state": "LIGHTWEIGHT",
+            "safety": {
+                "total_risk": float(getattr(safety, "risk_score", 0.0) or 0.0),
+                "override": False,
+            },
+        },
+        "controller_meta": {
+            "lightweight_turn": True,
+            "reason": lightweight_reason,
+            "persistence": {"deferred": True, "skipped_controller": True},
+        },
+        "io": {
+            "message_preview": "",
+            "reply_preview": preview_text(reply_text) if TRACE_INCLUDE_TEXT else "",
+        },
+        "phase04": phase04_meta,
+    }
+    meta["meta_v1"] = {
+        "trace_id": trace_id,
+        "intent": meta.get("intent") or {},
+        "intent_route": str(meta.get("intent_route") or intent or "general"),
+        "dialogue_state": "LIGHTWEIGHT",
+        "telemetry": meta.get("telemetry") or base_v0.get("telemetry"),
+        "safety": {
+            "total_risk": float(getattr(safety, "risk_score", 0.0) or 0.0),
+            "override": False,
+        },
+        "decision_candidates": [],
+    }
+    return meta
+
+
+def _run_phase04_for_turn_async(
+    *,
+    user_id: str,
+    session_id: Optional[str],
+    message: str,
+    trace_id: str,
+    persist: Any,
+    attachments: Optional[List[Dict[str, Any]]],
+) -> None:
+    try:
+        rt = get_phase04_runtime()
+        rt.run_for_turn(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+            trace_id=trace_id,
+            persist=persist,
+            attachments=attachments,
+        )
+    except Exception:
+        log.exception("phase04 deferred postprocess failed")
+
+
+def _kick_phase04_postprocess(
+    *,
+    user_id: str,
+    session_id: Optional[str],
+    message: str,
+    trace_id: str,
+    persist: Any,
+    attachments: Optional[List[Dict[str, Any]]],
+) -> Dict[str, Any]:
+    if _defer_phase04_postprocess_enabled():
+        threading.Thread(
+            target=_run_phase04_for_turn_async,
+            kwargs={
+                "user_id": user_id,
+                "session_id": session_id,
+                "message": message,
+                "trace_id": trace_id,
+                "persist": persist,
+                "attachments": attachments,
+            },
+            daemon=True,
+        ).start()
+        return {"deferred": True}
+    try:
+        rt = get_phase04_runtime()
+        return rt.run_for_turn(
+            user_id=user_id,
+            session_id=session_id,
+            message=message,
+            trace_id=trace_id,
+            persist=persist,
+            attachments=attachments,
+        )
+    except Exception:
+        return {"error": "phase04_failed"}
+
+
+def _persist_safety_assessment(
+    *,
+    trace_id: str,
+    user_id: str,
+    session_id: Optional[str],
+    safety: Any,
+) -> None:
+    if _supabase is None:
+        return
+    if not _is_uuid(str(user_id or "")):
+        return
+    try:
+        _supabase.insert(
+            "common_safety_assessments",
+            {
+                "trace_id": trace_id,
+                "user_id": user_id,
+                "session_id": session_id,
+                "safety_flag": getattr(safety, "safety_flag", None),
+                "risk_score": float(getattr(safety, "risk_score", 0.0) or 0.0),
+                "categories": getattr(safety, "categories", {}) or {},
+                "reasons": getattr(safety, "reasons", []) or [],
+                "meta": getattr(safety, "meta", {}) or {},
+            },
+        )
+    except Exception:
+        log.exception("deferred safety audit failed")
+
+
+def _enqueue_safety_assessment(
+    *,
+    trace_id: str,
+    user_id: str,
+    session_id: Optional[str],
+    safety: Any,
+) -> None:
+    if _defer_safety_audit_enabled():
+        threading.Thread(
+            target=_persist_safety_assessment,
+            kwargs={
+                "trace_id": trace_id,
+                "user_id": user_id,
+                "session_id": session_id,
+                "safety": safety,
+            },
+            daemon=True,
+        ).start()
+    else:
+        _persist_safety_assessment(
+            trace_id=trace_id,
+            user_id=user_id,
+            session_id=session_id,
+            safety=safety,
+        )
+
+
+def _assess_request_safety_quick(
+    *,
+    req: PersonaRequest,
+    embedding_model: Any,
+) -> Any:
+    safety_layer = _get_safety_layer(embedding_model=embedding_model)
+    return safety_layer.assess(
+        req=req,
+        value_state=ValueState(),
+        trait_state=TraitState(),
+        memory=None,
+    )
+
+
+def _intent_keyword_hint(message: str) -> Optional[str]:
+    s = str(message or "")
+    lower = s.lower()
+
+    weather_keywords = [
+        "天気", "気温", "降水", "雨", "晴れ", "曇", "雪", "台風", "forecast", "weather", "temperature",
+    ]
+    comparison_keywords = [
+        "比較", "違い", "どっち", "どちら", "比べ", "vs", "versus", "compare", "comparison", "better than",
+    ]
+    personalized_keywords = [
+        "私に", "自分に", "うちの", "僕に", "俺に", "for me", "for us", "for my", "my setup", "my project",
+    ]
+
+    if any(k in s for k in weather_keywords) or any(k in lower for k in weather_keywords):
+        return "weather"
+
+    has_compare = any(k in s for k in comparison_keywords) or any(k in lower for k in comparison_keywords)
+    has_pair_marker = any(tok in s for tok in ("と", "、", "/", "対")) or any(tok in lower for tok in (" vs ", " versus ", " or "))
+    if has_compare and has_pair_marker:
+        return "comparison"
+
+    if _web_rag_explicit_request(s):
+        if any(k in s for k in personalized_keywords) or any(k in lower for k in personalized_keywords):
+            return "personalized_realtime"
+        return "realtime_fact"
+
+    return None
+
+
+def _should_override_intent_with_hint(*, classified_intent: str, hinted_intent: Optional[str]) -> bool:
+    hinted = str(hinted_intent or "").strip().lower()
+    if not hinted:
+        return False
+    current = str(classified_intent or "").strip().lower()
+    if current == hinted:
+        return False
+    if current in ("meta", "safety"):
+        return False
+    if hinted in ("weather", "comparison"):
+        return current not in ("weather", "comparison", "meta", "safety")
+    if hinted in ("realtime_fact", "personalized_realtime"):
+        return current not in ("weather", "comparison", "meta", "safety")
+    return False
+
+
+def _classify_turn_intent(*, effective_message: str, tool_policy: Dict[str, Any]) -> str:
+    try:
+        from persona_core.intent_router import classify_intent
+
+        intent = classify_intent(effective_message)
+    except Exception:
+        intent = "general"
+    try:
+        hinted = _intent_keyword_hint(effective_message)
+        if _should_override_intent_with_hint(classified_intent=intent, hinted_intent=hinted):
+            return hinted
+    except Exception:
+        pass
+    try:
+        if (
+            intent not in ("realtime_fact", "personalized_realtime", "weather", "comparison")
+            and _tool_policy_allows_web_search(tool_policy)
+            and _tool_policy_web_search_mode(tool_policy) != "off"
+            and _web_rag_explicit_request(effective_message)
+        ):
+            return "realtime_fact"
+    except Exception:
+        pass
+    return intent
+
+
+async def _resolve_turn_external_context(
+    *,
+    intent: str,
+    effective_message: str,
+    effective_gen: Dict[str, Any],
+    tool_policy: Dict[str, Any],
+    trace_id: str,
+    session_id: str,
+    user_id: str,
+) -> Dict[str, Any]:
+    web_ctx = None
+    web_sources = None
+    web_meta = None
+    tool_weather = None
+    tool_comparison = None
+    personalization_hint: Optional[Dict[str, Any]] = None
+
+    if intent == "weather":
+        try:
+            from persona_core.phase04.tools.weather_api import weather_api_flow
+
+            tool_weather = weather_api_flow(effective_message)
+            web_ctx = (
+                "External Tool Context (weather_api).\n"
+                "Usage rules:\n"
+                "- Use this as supporting evidence.\n\n"
+                "tool.weather:\n"
+                + json.dumps(tool_weather, ensure_ascii=False, separators=(",", ":"))
+            )
+            web_sources = []
+            web_meta = {"intent": "weather", "provider": "weather_api"}
+        except Exception:
+            tool_weather = None
+            web_ctx, web_sources, web_meta = (None, None, None)
+    elif intent == "comparison":
+        try:
+            from persona_core.phase04.tools.comparison_flow import comparison_flow
+
+            tool_comparison = comparison_flow(effective_message)
+            safe = {}
+            try:
+                if isinstance(tool_comparison, dict):
+                    ia = tool_comparison.get("item_a") if isinstance(tool_comparison.get("item_a"), dict) else None
+                    ib = tool_comparison.get("item_b") if isinstance(tool_comparison.get("item_b"), dict) else None
+                    safe = {
+                        "item_a": {
+                            "name": (ia or {}).get("name"),
+                            "summary": ((ia or {}).get("result") or {}).get("summary") if isinstance((ia or {}).get("result"), dict) else None,
+                            "key_points": ((ia or {}).get("result") or {}).get("key_points") if isinstance((ia or {}).get("result"), dict) else None,
+                        },
+                        "item_b": {
+                            "name": (ib or {}).get("name"),
+                            "summary": ((ib or {}).get("result") or {}).get("summary") if isinstance((ib or {}).get("result"), dict) else None,
+                            "key_points": ((ib or {}).get("result") or {}).get("key_points") if isinstance((ib or {}).get("result"), dict) else None,
+                        },
+                        "differences": tool_comparison.get("differences") if isinstance(tool_comparison.get("differences"), list) else [],
+                    }
+            except Exception:
+                safe = {}
+            web_ctx = (
+                "External Tool Context (comparison_flow).\n"
+                "Usage rules:\n"
+                "- Use this as supporting evidence.\n"
+                "- Do NOT invent specs not present.\n\n"
+                "tool.comparison:\n"
+                + json.dumps(safe, ensure_ascii=False, separators=(",", ":"))
+            )
+            web_sources = []
+            web_meta = {"intent": "comparison", "provider": "comparison_flow"}
+        except Exception:
+            tool_comparison = None
+            web_ctx, web_sources, web_meta = (None, None, None)
+    elif intent in ("personalized_realtime", "realtime_fact"):
+        try:
+            if not _tool_policy_allows_web_search(tool_policy) or _tool_policy_web_search_mode(tool_policy) == "off":
+                raise RuntimeError("web_search_disabled_by_policy")
+            # Explicit realtime/news/status requests should still be allowed to
+            # prefetch web context even when multimodal is sdk_first. Native
+            # attachment routing and web search serve different roles.
+            forced_gen: Optional[Dict[str, Any]] = None
+            try:
+                g0 = effective_gen if isinstance(effective_gen, dict) else {}
+                forced_gen = dict(g0)
+                web_cfg = forced_gen.get("web_rag")
+                if isinstance(web_cfg, dict):
+                    forced_gen["web_rag"] = {**web_cfg, "enabled": True}
+                else:
+                    forced_gen["web_rag"] = {"enabled": True}
+            except Exception:
+                forced_gen = (effective_gen if isinstance(effective_gen, dict) else None)
+
+            web_ctx, web_sources, web_meta = await _maybe_web_rag_for_turn(
+                message=effective_message,
+                gen=forced_gen,
+                trace_id=trace_id,
+                session_id=session_id,
+                user_id=str(user_id),
+                persona_db=(SupabasePersonaDB(_supabase) if (_supabase is not None and _is_uuid(str(user_id))) else None),
+            )
+            if not isinstance(web_meta, dict):
+                web_meta = {}
+            if not (isinstance(web_ctx, str) and web_ctx.strip()) and not web_meta:
+                web_meta = {
+                    "intent": str(intent or "realtime_fact"),
+                    "provider": "web_rag",
+                    "skipped_reason": "no_context_returned",
+                }
+        except Exception as e:
+            web_ctx, web_sources = (None, None)
+            web_meta = {
+                "intent": str(intent or "realtime_fact"),
+                "provider": "web_rag",
+                "skipped_reason": str(e),
+            }
+
+        if intent == "personalized_realtime":
+            try:
+                hint_profile: Dict[str, Any] = {"user_id": str(user_id)}
+                if _supabase is not None and _is_uuid(str(user_id)):
+                    try:
+                        persona_db2 = SupabasePersonaDB(_supabase)
+                        vs = persona_db2.load_last_value_state(user_id=str(user_id))
+                        ts = persona_db2.load_last_trait_state(user_id=str(user_id))
+                        if vs is not None:
+                            hint_profile["value_state"] = vs.to_dict()
+                        if ts is not None:
+                            hint_profile["trait_state"] = ts.to_dict()
+                    except Exception:
+                        pass
+                project_type: Optional[str] = None
+                try:
+                    if isinstance(effective_gen, dict):
+                        for k in ("project_type", "app", "channel", "client"):
+                            v = effective_gen.get(k)
+                            if isinstance(v, str) and v.strip():
+                                project_type = v.strip()
+                                break
+                except Exception:
+                    project_type = None
+                personalization_hint = {"user_profile": hint_profile, "project_type": project_type}
+            except Exception:
+                personalization_hint = None
+
+    return {
+        "web_ctx": web_ctx,
+        "web_sources": web_sources,
+        "web_meta": web_meta,
+        "tool_weather": tool_weather,
+        "tool_comparison": tool_comparison,
+        "personalization_hint": personalization_hint,
+    }
+
+
 def _web_rag_explicit_request(message: str) -> bool:
     s = (message or "")
+    lower = s.lower()
     # Explicit user intent (Japanese + common English)
     keywords = [
         "最新",
@@ -1449,14 +2196,44 @@ def _web_rag_explicit_request(message: str) -> bool:
         "news",
         "headline",
         "article",
+        "latest",
+        "recent",
+        "current",
+        "today",
+        "update",
+        "updates",
+        "look up",
         "outage",
         "status",
         "source",
+        "sources",
         "citation",
+        "citations",
+        "reference",
+        "references",
         "browse",
         "web search",
     ]
-    return any(k in s for k in keywords)
+    if any(k in s for k in keywords) or any(k in lower for k in keywords):
+        return True
+    explicit_patterns = [
+        r"\bsearch\b",
+        r"\bsearch for\b",
+        r"\blook up\b",
+        r"\bbrowse\b",
+        r"\bfind\b",
+        r"\bsource(s)?\b",
+        r"\bcitation(s)?\b",
+        r"\breference(s)?\b",
+        r"\bstatus\b",
+        r"\boutage\b",
+        r"\blatest\b",
+        r"\brecent\b",
+        r"\bcurrent\b",
+        r"\btoday\b",
+        r"\bnews\b",
+    ]
+    return any(re.search(pattern, lower) for pattern in explicit_patterns)
 
 
 def _web_rag_time_sensitive_hint(message: str) -> bool:
@@ -1734,6 +2511,7 @@ def _build_attachments_context(
     *,
     attachments: Optional[List[Dict[str, Any]]],
     auth: Optional[AuthContext],
+    skip_attachment_ids: Optional[set[str]] = None,
 ) -> str:
     """
     Convert attachments metadata into a bounded context block.
@@ -1746,16 +2524,46 @@ def _build_attachments_context(
     auto_parse = os.getenv("SIGMARIS_CHAT_AUTO_PARSE_ATTACHMENTS", "").strip().lower() in ("1", "true", "yes", "on")
     max_items = int(os.getenv("SIGMARIS_CHAT_ATTACHMENTS_MAX_ITEMS", "3") or "3")
     max_excerpt = int(os.getenv("SIGMARIS_CHAT_ATTACHMENTS_MAX_EXCERPT_CHARS", "1200") or "1200")
-
-    from persona_core.phase04.parsing.file_parser import parse_file_bytes  # local import
+    parse_file_bytes = None
 
     lines: List[str] = ["# Attachments (Phase04)"]
     count = 0
     for raw in atts[: max(0, max_items)]:
         if not isinstance(raw, dict):
             continue
+        raw_type = _safe_str(raw.get("type") or "").strip().lower()
+        if raw_type == "link_analysis":
+            url = _safe_str(raw.get("url") or "").strip()
+            provider = _safe_str(raw.get("provider") or "").strip()
+            results = raw.get("results") if isinstance(raw.get("results"), list) else []
+            count += 1
+            head = f"[{count}] linked source"
+            if provider:
+                head += f" ({provider})"
+            if url:
+                head += f" {url}"
+            lines.append(head)
+            for item in results[:3]:
+                if not isinstance(item, dict):
+                    continue
+                title = _safe_str(item.get("title") or item.get("name") or "").strip()
+                snippet = _safe_str(item.get("snippet") or "").strip()
+                target_url = _safe_str(item.get("url") or item.get("repository_url") or "").strip()
+                body_parts = [part for part in (title, snippet, target_url) if part]
+                if not body_parts:
+                    continue
+                ex = " | ".join(body_parts)
+                if max_excerpt > 0 and len(ex) > max_excerpt:
+                    ex = ex[: max(0, max_excerpt - 1)] + "…"
+                lines.append(ex)
+            continue
+
         attachment_id = raw.get("attachment_id")
         if not isinstance(attachment_id, str) or not attachment_id.strip():
+            continue
+        if isinstance(skip_attachment_ids, set) and attachment_id in skip_attachment_ids:
+            # Native SDK input already carries the attachment, so duplicating a text excerpt here
+            # only bloats prompt size and slows TTFT.
             continue
 
         file_name = _safe_str(raw.get("file_name") or raw.get("name") or "").strip()
@@ -1769,6 +2577,10 @@ def _build_attachments_context(
         elif auto_parse:
             # Best-effort: download bytes and parse here (same auth rules as /io/parse).
             try:
+                if parse_file_bytes is None:
+                    from persona_core.phase04.parsing.file_parser import parse_file_bytes as _parse_file_bytes  # local import
+
+                    parse_file_bytes = _parse_file_bytes
                 data: Optional[bytes] = None
                 meta: Dict[str, Any] = {}
                 if _supabase is not None and _storage is not None and auth is not None:
@@ -2049,6 +2861,144 @@ def _get_safety_layer(*, embedding_model: Any) -> SafetyLayer:
     return _safety_layer
 
 
+def _parse_trait_baseline(req: "ChatRequest") -> Optional[TraitState]:
+    try:
+        if isinstance(req.trait_baseline, dict):
+            return TraitState(
+                calm=float(req.trait_baseline.get("calm", 0.5)),
+                empathy=float(req.trait_baseline.get("empathy", 0.5)),
+                curiosity=float(req.trait_baseline.get("curiosity", 0.5)),
+            )
+    except Exception:
+        return None
+    return None
+
+
+def _inject_operator_overrides(*, preq: PersonaRequest, init_states: Dict[str, Any]) -> None:
+    try:
+        op = init_states.get("op")
+        payload = (op or {}).get("payload") if isinstance(op, dict) else None
+        if isinstance(payload, dict):
+            mode = payload.get("subjectivity_mode")
+            freeze = payload.get("freeze_updates")
+            if isinstance(mode, str) and mode.strip():
+                preq.metadata["_operator_subjectivity_mode"] = mode.strip()
+            if isinstance(freeze, bool):
+                preq.metadata["_freeze_updates"] = bool(preq.metadata.get("_freeze_updates") or freeze)
+    except Exception:
+        pass
+
+
+def _inject_safety_metadata(*, preq: PersonaRequest, safety: Any) -> None:
+    try:
+        if isinstance(getattr(preq, "metadata", None), dict):
+            preq.metadata["_safety_risk_score"] = float(getattr(safety, "risk_score", 0.0) or 0.0)
+            preq.metadata["_safety_flag"] = getattr(safety, "safety_flag", None)
+            preq.metadata["_safety_categories"] = getattr(safety, "categories", {}) or {}
+    except Exception:
+        pass
+
+
+async def _build_controller_runtime(
+    *,
+    req: "ChatRequest",
+    preq: PersonaRequest,
+    user_id: str,
+    baseline_from_client: Optional[TraitState],
+) -> Dict[str, Any]:
+    llm_client = _get_llm_client()
+    if _supabase is not None:
+        embedding_model = llm_client
+        persona_db = SupabasePersonaDB(_supabase)
+        phase04_db = persona_db
+        init_states = await _load_supabase_initial_states(persona_db=persona_db, user_id=user_id)
+        _inject_operator_overrides(preq=preq, init_states=init_states)
+
+        init_value = init_states.get("value") if isinstance(init_states.get("value"), ValueState) else ValueState()
+        init_trait = init_states.get("trait") if isinstance(init_states.get("trait"), TraitState) else TraitState()
+        init_ego: Optional[EgoContinuityState] = None
+        try:
+            st = init_states.get("ego")
+            if isinstance(st, dict):
+                init_ego = EgoContinuityState.from_dict(st)
+        except Exception:
+            init_ego = None
+
+        init_tid: Optional[TemporalIdentityState] = None
+        try:
+            st = init_states.get("tid")
+            if isinstance(st, dict):
+                init_tid = TemporalIdentityState.from_dict(st)
+        except Exception:
+            init_tid = None
+
+        episode_store = SupabaseEpisodeStore(_supabase, user_id=user_id, character_id=req.character_id)
+        selective_recall = SelectiveRecall(memory_backend=episode_store, embedding_model=embedding_model)
+        ambiguity_resolver = AmbiguityResolver(embedding_model=embedding_model)
+        episode_merger = EpisodeMerger(memory_backend=episode_store)
+        memory_orchestrator = MemoryOrchestrator(
+            selective_recall=selective_recall,
+            episode_merger=episode_merger,
+            ambiguity_resolver=ambiguity_resolver,
+        )
+        controller = PersonaController(
+            config=PersonaControllerConfig(default_user_id=None),
+            memory_orchestrator=memory_orchestrator,
+            identity_engine=IdentityContinuityEngineV3(),
+            value_engine=ValueDriftEngine(),
+            trait_engine=TraitDriftEngine(),
+            global_fsm=GlobalStateMachine(),
+            episode_store=episode_store,
+            persona_db=persona_db,
+            llm_client=llm_client,
+            initial_value_state=init_value,
+            initial_trait_state=init_trait,
+            initial_trait_baseline=baseline_from_client or init_trait,
+            initial_ego_state=init_ego,
+            initial_temporal_identity_state=init_tid,
+        )
+        safety = _get_safety_layer(embedding_model=embedding_model).assess(
+            req=preq,
+            value_state=init_value,
+            trait_state=init_trait,
+            memory=None,
+        )
+        _enqueue_safety_assessment(
+            trace_id=str((getattr(preq, "metadata", None) or {}).get("_trace_id") or ""),
+            user_id=str(user_id),
+            session_id=getattr(preq, "session_id", None),
+            safety=safety,
+        )
+        _inject_safety_metadata(preq=preq, safety=safety)
+        return {
+            "llm_client": llm_client,
+            "controller": controller,
+            "safety": safety,
+            "phase04_db": phase04_db,
+        }
+
+    controller = _get_inmemory_controller()
+    safety = _get_safety_layer(embedding_model=llm_client).assess(
+        req=preq,
+        value_state=ValueState(),
+        trait_state=TraitState(),
+        memory=None,
+    )
+    _enqueue_safety_assessment(
+        trace_id=str((getattr(preq, "metadata", None) or {}).get("_trace_id") or ""),
+        user_id=str(user_id),
+        session_id=getattr(preq, "session_id", None),
+        safety=safety,
+    )
+    _inject_safety_metadata(preq=preq, safety=safety)
+    return {
+        "llm_client": llm_client,
+        "controller": controller,
+        "safety": safety,
+        "phase04_db": None,
+    }
+
+
 # =============================================================
 # Operator / Override APIs
 # =============================================================
@@ -2160,174 +3110,37 @@ async def persona_chat(req: ChatRequest, auth: Optional[AuthContext] = Depends(g
 
     effective_message, client_history = _derive_message_and_history(req)
     external_system = _merge_external_system(req.persona_system, req.system)
-    attachments_ctx = _build_attachments_context(attachments=req.attachments, auth=auth)
+    effective_gen = _merge_gen_with_tool_policy(req.gen, req.tool_policy)
+    tool_policy = _tool_policy_dict(req.tool_policy)
+    native_attachments = _resolve_native_attachments(attachments=req.attachments, auth=auth) if _should_use_native_attachments(effective_gen) else []
+    native_attachment_ids = _resolved_attachment_ids(native_attachments)
+    attachments_ctx = _build_attachments_context(
+        attachments=req.attachments,
+        auth=auth,
+        skip_attachment_ids=native_attachment_ids,
+    )
     if attachments_ctx:
         effective_message = (effective_message + "\n\n" + attachments_ctx).strip()
 
     overload_score = _estimate_overload_score(effective_message)
 
-    # Intent Router (core-side)
-    try:
-        from persona_core.intent_router import classify_intent
+    intent = _classify_turn_intent(effective_message=effective_message, tool_policy=tool_policy)
 
-        intent = classify_intent(effective_message)
-    except Exception:
-        intent = "general"
-
-    # Fallback: explicit search requests should still trigger Web RAG when enabled.
-    try:
-        if intent == "general" and _web_rag_enabled() and _web_rag_explicit_request(effective_message):
-            intent = "realtime_fact"
-    except Exception:
-        pass
-
-    web_ctx = None
-    web_sources = None
-    web_meta = None
-
-    tool_weather = None
-    tool_comparison = None
-    personalization_hint: Optional[Dict[str, Any]] = None
-
-    if intent == "weather":
-        try:
-            from persona_core.phase04.tools.weather_api import weather_api_flow
-
-            tool_weather = weather_api_flow(effective_message)
-            web_ctx = (
-                "External Tool Context (weather_api).\n"
-                "Usage rules:\n"
-                "- Use this as supporting evidence.\n\n"
-                "tool.weather:\n"
-                + json.dumps(tool_weather, ensure_ascii=False, separators=(",", ":"))
-            )
-            web_sources = []
-            web_meta = {"intent": "weather", "provider": "weather_api"}
-        except Exception:
-            tool_weather = None
-            web_ctx, web_sources, web_meta = (None, None, None)
-    elif intent == "comparison":
-        try:
-            from persona_core.phase04.tools.comparison_flow import comparison_flow
-
-            tool_comparison = comparison_flow(effective_message)
-
-            # Remove URLs from injected context; keep sources in metadata only.
-            safe = {}
-            try:
-                if isinstance(tool_comparison, dict):
-                    ia = tool_comparison.get("item_a") if isinstance(tool_comparison.get("item_a"), dict) else None
-                    ib = tool_comparison.get("item_b") if isinstance(tool_comparison.get("item_b"), dict) else None
-                    safe = {
-                        "item_a": {
-                            "name": (ia or {}).get("name"),
-                            "summary": ((ia or {}).get("result") or {}).get("summary") if isinstance((ia or {}).get("result"), dict) else None,
-                            "key_points": ((ia or {}).get("result") or {}).get("key_points") if isinstance((ia or {}).get("result"), dict) else None,
-                        },
-                        "item_b": {
-                            "name": (ib or {}).get("name"),
-                            "summary": ((ib or {}).get("result") or {}).get("summary") if isinstance((ib or {}).get("result"), dict) else None,
-                            "key_points": ((ib or {}).get("result") or {}).get("key_points") if isinstance((ib or {}).get("result"), dict) else None,
-                        },
-                        "differences": tool_comparison.get("differences") if isinstance(tool_comparison.get("differences"), list) else [],
-                    }
-            except Exception:
-                safe = {}
-
-            web_ctx = (
-                "External Tool Context (comparison_flow).\n"
-                "Usage rules:\n"
-                "- Use this as supporting evidence.\n"
-                "- Do NOT invent specs not present.\n\n"
-                "tool.comparison:\n"
-                + json.dumps(safe, ensure_ascii=False, separators=(",", ":"))
-            )
-            web_sources = []
-            web_meta = {"intent": "comparison", "provider": "comparison_flow"}
-        except Exception:
-            tool_comparison = None
-            web_ctx, web_sources, web_meta = (None, None, None)
-    elif intent == "personalized_realtime":
-        try:
-            forced_gen: Optional[Dict[str, Any]] = None
-            try:
-                g0 = req.gen if isinstance(req.gen, dict) else {}
-                forced_gen = dict(g0)
-                web_cfg = forced_gen.get("web_rag")
-                if isinstance(web_cfg, dict):
-                    forced_gen["web_rag"] = {**web_cfg, "enabled": True}
-                else:
-                    forced_gen["web_rag"] = {"enabled": True}
-            except Exception:
-                forced_gen = (req.gen if isinstance(req.gen, dict) else None)
-
-            web_ctx, web_sources, web_meta = await _maybe_web_rag_for_turn(
-                message=effective_message,
-                gen=forced_gen,
-                trace_id=trace_id,
-                session_id=session_id,
-                user_id=str(user_id),
-                persona_db=(SupabasePersonaDB(_supabase) if (_supabase is not None and _is_uuid(str(user_id))) else None),
-            )
-        except Exception:
-            web_ctx, web_sources, web_meta = (None, None, None)
-
-        # Attach a lightweight personalization hint (best-effort; no impact to persona logic).
-        try:
-            hint_profile: Dict[str, Any] = {"user_id": str(user_id)}
-            if _supabase is not None and _is_uuid(str(user_id)):
-                try:
-                    persona_db2 = SupabasePersonaDB(_supabase)
-                    vs = persona_db2.load_last_value_state(user_id=str(user_id))
-                    ts = persona_db2.load_last_trait_state(user_id=str(user_id))
-                    if vs is not None:
-                        hint_profile["value_state"] = vs.to_dict()
-                    if ts is not None:
-                        hint_profile["trait_state"] = ts.to_dict()
-                except Exception:
-                    pass
-
-            project_type: Optional[str] = None
-            try:
-                if isinstance(req.gen, dict):
-                    for k in ("project_type", "app", "channel", "client"):
-                        v = req.gen.get(k)
-                        if isinstance(v, str) and v.strip():
-                            project_type = v.strip()
-                            break
-            except Exception:
-                project_type = None
-
-            personalization_hint = {
-                "user_profile": hint_profile,
-                "project_type": project_type,
-            }
-        except Exception:
-            personalization_hint = None
-    elif intent == "realtime_fact":
-        try:
-            forced_gen: Optional[Dict[str, Any]] = None
-            try:
-                g0 = req.gen if isinstance(req.gen, dict) else {}
-                forced_gen = dict(g0)
-                web_cfg = forced_gen.get("web_rag")
-                if isinstance(web_cfg, dict):
-                    forced_gen["web_rag"] = {**web_cfg, "enabled": True}
-                else:
-                    forced_gen["web_rag"] = {"enabled": True}
-            except Exception:
-                forced_gen = (req.gen if isinstance(req.gen, dict) else None)
-
-            web_ctx, web_sources, web_meta = await _maybe_web_rag_for_turn(
-                message=effective_message,
-                gen=forced_gen,
-                trace_id=trace_id,
-                session_id=session_id,
-                user_id=str(user_id),
-                persona_db=(SupabasePersonaDB(_supabase) if (_supabase is not None and _is_uuid(str(user_id))) else None),
-            )
-        except Exception:
-            web_ctx, web_sources, web_meta = (None, None, None)
+    resolved_ctx = await _resolve_turn_external_context(
+        intent=intent,
+        effective_message=effective_message,
+        effective_gen=(effective_gen if isinstance(effective_gen, dict) else {}),
+        tool_policy=tool_policy,
+        trace_id=trace_id,
+        session_id=session_id,
+        user_id=str(user_id),
+    )
+    web_ctx = resolved_ctx["web_ctx"]
+    web_sources = resolved_ctx["web_sources"]
+    web_meta = resolved_ctx["web_meta"]
+    tool_weather = resolved_ctx["tool_weather"]
+    tool_comparison = resolved_ctx["tool_comparison"]
+    personalization_hint = resolved_ctx["personalization_hint"]
 
     preq = PersonaRequest(
         user_id=user_id,
@@ -2339,166 +3152,104 @@ async def persona_chat(req: ChatRequest, auth: Optional[AuthContext] = Depends(g
             **({"_personalization_hint": personalization_hint} if isinstance(personalization_hint, dict) and personalization_hint else {}),
             **({"_tool_weather": tool_weather} if isinstance(tool_weather, dict) and tool_weather else {}),
             **({"_comparison": tool_comparison} if isinstance(tool_comparison, dict) and tool_comparison else {}),
+            **({"_attachments": req.attachments} if isinstance(req.attachments, list) and req.attachments else {}),
+            **({"_native_input_attachments": native_attachments} if native_attachments else {}),
             **({"character_id": req.character_id} if req.character_id else {}),
             **({"chat_mode": req.chat_mode} if isinstance(req.chat_mode, str) and req.chat_mode.strip() else {}),
             **({"persona_system": external_system} if external_system else {}),
             **({"_external_knowledge": web_ctx} if isinstance(web_ctx, str) and web_ctx.strip() else {}),
             **({"_web_rag_sources": web_sources} if isinstance(web_sources, list) and web_sources else {}),
             **({"_web_rag_meta": web_meta} if isinstance(web_meta, dict) and web_meta else {}),
-            **({"gen": req.gen} if isinstance(req.gen, dict) and req.gen else {}),
+            **({"gen": effective_gen} if isinstance(effective_gen, dict) and effective_gen else {}),
+            **({"_tool_policy": tool_policy} if tool_policy else {}),
             **({"client_history": client_history} if client_history else {}),
         },
     )
 
-    phase04_db: Any = None
+    try:
+        llm_client = _get_llm_client()
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    phase04_db: Any = SupabasePersonaDB(_supabase) if _supabase is not None else None
     phase04_meta: Dict[str, Any] = {}
-
-    # baseline はフロント側（Supabaseの直近snapshot）から渡せるようにする。
-    baseline_from_client: Optional[TraitState] = None
-    try:
-        if isinstance(req.trait_baseline, dict):
-            baseline_from_client = TraitState(
-                calm=float(req.trait_baseline.get("calm", 0.5)),
-                empathy=float(req.trait_baseline.get("empathy", 0.5)),
-                curiosity=float(req.trait_baseline.get("curiosity", 0.5)),
-            )
-    except Exception:
-        baseline_from_client = None
-
-    # =========================================================
-    # Storage selection
-    # - SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY があれば Supabase(Postgres) を正史として使う
-    # =========================================================
-    if _supabase is not None:
-        llm_client = _get_llm_client()
-        embedding_model = llm_client
-
-        persona_db = SupabasePersonaDB(_supabase)
-        phase04_db = persona_db
-        init_states = await _load_supabase_initial_states(persona_db=persona_db, user_id=user_id)
-
-        # Phase02: operator overrides (best-effort). These affect *behavior*, not stored identity directly.
-        # - subjectivity_mode: force mode (S0..S3) or "AUTO"
-        # - freeze_updates: force drift freeze on this request
+    quick_safety = _assess_request_safety_quick(req=preq, embedding_model=llm_client)
+    if _should_use_lightweight_turn(
+        req=req,
+        intent=intent,
+        effective_message=effective_message,
+        web_ctx=web_ctx,
+        tool_weather=tool_weather,
+        tool_comparison=tool_comparison,
+        personalization_hint=personalization_hint,
+        safety_flag=getattr(quick_safety, "safety_flag", None),
+    ):
         try:
-            op = init_states.get("op")
-            payload = (op or {}).get("payload") if isinstance(op, dict) else None
-            if isinstance(payload, dict):
-                mode = payload.get("subjectivity_mode")
-                freeze = payload.get("freeze_updates")
-                if isinstance(mode, str) and mode.strip():
-                    preq.metadata["_operator_subjectivity_mode"] = mode.strip()
-                if isinstance(freeze, bool):
-                    preq.metadata["_freeze_updates"] = bool(preq.metadata.get("_freeze_updates") or freeze)
+            if isinstance(getattr(preq, "metadata", None), dict):
+                preq.metadata["_safety_risk_score"] = float(getattr(quick_safety, "risk_score", 0.0) or 0.0)
+                preq.metadata["_safety_flag"] = getattr(quick_safety, "safety_flag", None)
+                preq.metadata["_safety_categories"] = getattr(quick_safety, "categories", {}) or {}
         except Exception:
             pass
-
-        # 直近スナップショットから状態を復元（初回は default）
-        init_states = await _load_supabase_initial_states(persona_db=persona_db, user_id=user_id)
-        init_value = init_states.get("value") if isinstance(init_states.get("value"), ValueState) else ValueState()
-        init_trait = init_states.get("trait") if isinstance(init_states.get("trait"), TraitState) else TraitState()
-        init_ego: Optional[EgoContinuityState] = None
-        try:
-            st = init_states.get("ego")
-            if isinstance(st, dict):
-                init_ego = EgoContinuityState.from_dict(st)
-        except Exception:
-            init_ego = None
-
-        init_tid: Optional[TemporalIdentityState] = None
-        try:
-            st = init_states.get("tid")
-            if isinstance(st, dict):
-                init_tid = TemporalIdentityState.from_dict(st)
-        except Exception:
-            init_tid = None
-
-        # user_id ごとに EpisodeStore を分離（同一 user の記憶が永続化される）
-        episode_store = SupabaseEpisodeStore(_supabase, user_id=user_id, character_id=req.character_id)
-
-        # wiring（requestごとに controller を組み立てて、DBの状態を正とする）
-        selective_recall = SelectiveRecall(memory_backend=episode_store, embedding_model=embedding_model)
-        ambiguity_resolver = AmbiguityResolver(embedding_model=embedding_model)
-        episode_merger = EpisodeMerger(memory_backend=episode_store)
-        memory_orchestrator = MemoryOrchestrator(
-            selective_recall=selective_recall,
-            episode_merger=episode_merger,
-            ambiguity_resolver=ambiguity_resolver,
+        _enqueue_safety_assessment(
+            trace_id=trace_id,
+            user_id=str(user_id),
+            session_id=session_id,
+            safety=quick_safety,
         )
-
-        controller = PersonaController(
-            config=PersonaControllerConfig(default_user_id=None),
-            memory_orchestrator=memory_orchestrator,
-            identity_engine=IdentityContinuityEngineV3(),
-            value_engine=ValueDriftEngine(),
-            trait_engine=TraitDriftEngine(),
-            global_fsm=GlobalStateMachine(),
-            episode_store=episode_store,
-            persona_db=persona_db,
-            llm_client=llm_client,
-            initial_value_state=init_value,
-            initial_trait_state=init_trait,
-            initial_trait_baseline=baseline_from_client or init_trait,
-            initial_ego_state=init_ego,
-            initial_temporal_identity_state=init_tid,
+        lightweight_gen = dict(effective_gen) if isinstance(effective_gen, dict) else {}
+        if native_attachments:
+            lightweight_gen["_native_input_attachments"] = native_attachments
+        system_prompt = _build_lightweight_system_prompt(
+            external_system=external_system,
+            web_ctx=web_ctx if isinstance(web_ctx, str) else None,
         )
-
-        # Safety は復元状態を使って評価
-        safety_layer = _get_safety_layer(embedding_model=embedding_model)
-        safety = safety_layer.assess(
-            req=preq,
-            value_state=init_value,
-            trait_state=init_trait,
-            memory=None,
+        reply_text = llm_client.generate_direct(
+            system_prompt=system_prompt,
+            user_text=effective_message,
+            history=client_history,
+            gen=lightweight_gen,
+            user=str(user_id),
+            audit_ctx={
+                "user_id": str(user_id),
+                "session_id": str(session_id),
+                "trace_id": trace_id,
+            },
         )
-
-        # Safety 監査ログ（任意）
-        try:
-            _supabase.insert(
-                "common_safety_assessments",
-                {
-                    "trace_id": trace_id,
-                    "user_id": user_id,
-                    "session_id": session_id,
-                    "safety_flag": safety.safety_flag,
-                    "risk_score": float(safety.risk_score),
-                    "categories": safety.categories,
-                    "reasons": safety.reasons,
-                    "meta": safety.meta,
-                },
-            )
-        except Exception:
-            pass
-
-    else:
-        persona_db = _persona_db
-        episode_store = _episode_store
-        phase04_db = None
-        try:
-            controller = _get_inmemory_controller()
-        except RuntimeError as e:
-            # サーバは起動するが、LLMが使えない状態ではAPI呼び出しを明示的に失敗させる
-            raise HTTPException(status_code=500, detail=str(e))
-
-        # SafetyLayer は Value/Trait/Memory を受け取れる設計だが、
-        # in-memory デモでは「まず追えること」を優先して簡易判定にする。
-        llm_client = _get_llm_client()
-        safety_layer = _get_safety_layer(embedding_model=llm_client)
-        safety = safety_layer.assess(
-            req=preq,
-            value_state=ValueState(),
-            trait_state=TraitState(),
-            memory=None,
+        phase04_meta = _kick_phase04_postprocess(
+            user_id=user_id,
+            session_id=session_id,
+            message=effective_message,
+            trace_id=trace_id,
+            persist=phase04_db,
+            attachments=req.attachments if isinstance(req.attachments, list) else None,
         )
+        meta = _lightweight_meta(
+            trace_id=trace_id,
+            t0=t0,
+            intent=intent,
+            safety=quick_safety,
+            phase04_meta=phase04_meta,
+            reply_text=reply_text,
+            lightweight_reason="general_fast_path",
+        )
+        trace_event(
+            log,
+            trace_id=trace_id,
+            event="persona_chat.lightweight_completed",
+            fields={"timing_ms": meta["timing_ms"], "reply_len": len(reply_text or "")},
+        )
+        return ChatResponse(reply=reply_text, meta=meta)
 
-    # SafetyLayer の数値メタを controller 側でも参照できるように注入
-    try:
-        if isinstance(getattr(preq, "metadata", None), dict):
-            preq.metadata["_safety_risk_score"] = float(getattr(safety, "risk_score", 0.0) or 0.0)
-            preq.metadata["_safety_flag"] = getattr(safety, "safety_flag", None)
-            preq.metadata["_safety_categories"] = getattr(safety, "categories", {}) or {}
-    except Exception:
-        pass
+    runtime = await _build_controller_runtime(
+        req=req,
+        preq=preq,
+        user_id=user_id,
+        baseline_from_client=_parse_trait_baseline(req),
+    )
+    controller = runtime["controller"]
+    safety = runtime["safety"]
+    phase04_db = runtime["phase04_db"]
 
     trace_event(
         log,
@@ -2515,30 +3266,65 @@ async def persona_chat(req: ChatRequest, auth: Optional[AuthContext] = Depends(g
         },
     )
 
-    result = controller.handle_turn(
-        preq,
-        user_id=user_id,
-        safety_flag=safety.safety_flag,
-        overload_score=overload_score,
-        reward_signal=req.reward_signal,
-        affect_signal=req.affect_signal,
-    )
+    if _defer_nonstream_persistence_enabled() and hasattr(controller, "handle_turn_stream"):
+        result = None
+        for ev in controller.handle_turn_stream(
+            preq,
+            user_id=user_id,
+            safety_flag=safety.safety_flag,
+            overload_score=overload_score,
+            reward_signal=req.reward_signal,
+            affect_signal=req.affect_signal,
+            defer_persistence=True,
+        ):
+            if isinstance(ev, dict) and ev.get("type") == "done":
+                maybe_result = ev.get("result")
+                if maybe_result is not None:
+                    result = maybe_result
+                    break
+        if result is None:
+            raise RuntimeError("handle_turn_stream finished without done result")
+    else:
+        result = controller.handle_turn(
+            preq,
+            user_id=user_id,
+            safety_flag=safety.safety_flag,
+            overload_score=overload_score,
+            reward_signal=req.reward_signal,
+            affect_signal=req.affect_signal,
+        )
 
     v0 = _normalize_v0(trace_id=trace_id, controller_meta=result.meta)
     decision_candidates = _normalize_decision_candidates(controller_meta=result.meta, v0=v0)
 
-    try:
-        rt = get_phase04_runtime()
-        phase04_meta = rt.run_for_turn(
-            user_id=user_id,
-            session_id=session_id,
-            message=effective_message,
-            trace_id=trace_id,
-            persist=phase04_db,
-            attachments=req.attachments if isinstance(req.attachments, list) else None,
-        )
-    except Exception:
-        phase04_meta = {"error": "phase04_failed"}
+    attachments_for_phase04 = req.attachments if isinstance(req.attachments, list) else None
+    if _defer_phase04_postprocess_enabled():
+        phase04_meta = {"deferred": True}
+        threading.Thread(
+            target=_run_phase04_for_turn_async,
+            kwargs={
+                "user_id": user_id,
+                "session_id": session_id,
+                "message": effective_message,
+                "trace_id": trace_id,
+                "persist": phase04_db,
+                "attachments": attachments_for_phase04,
+            },
+            daemon=True,
+        ).start()
+    else:
+        try:
+            rt = get_phase04_runtime()
+            phase04_meta = rt.run_for_turn(
+                user_id=user_id,
+                session_id=session_id,
+                message=effective_message,
+                trace_id=trace_id,
+                persist=phase04_db,
+                attachments=attachments_for_phase04,
+            )
+        except Exception:
+            phase04_meta = {"error": "phase04_failed"}
 
     meta: Dict[str, Any] = {
         "meta_version": META_VERSION,
@@ -2547,6 +3333,7 @@ async def persona_chat(req: ChatRequest, auth: Optional[AuthContext] = Depends(g
         "config_hash": str(CONFIG_HASH),
         "trace_id": trace_id,
         "intent": v0.get("intent") or {},
+        "intent_route": str(intent or "general"),
         "dialogue_state": v0.get("dialogue_state") or "UNKNOWN",
         "telemetry": v0.get("telemetry") or {"C": 0.0, "N": 0.0, "M": 0.0, "S": 0.0, "R": 0.0},
         "decision_candidates": decision_candidates,
@@ -2619,6 +3406,7 @@ async def persona_chat(req: ChatRequest, auth: Optional[AuthContext] = Depends(g
     meta["meta_v1"] = {
         "trace_id": str(meta.get("trace_id") or trace_id),
         "intent": meta.get("intent") or {},
+        "intent_route": str(meta.get("intent_route") or intent or "general"),
         "dialogue_state": str(meta.get("dialogue_state") or "UNKNOWN"),
         "telemetry": meta.get("telemetry") or {"C": 0.0, "N": 0.0, "M": 0.0, "S": 0.0, "R": 0.0},
         "safety": {
@@ -2660,172 +3448,37 @@ async def persona_chat_stream(req: ChatRequest, auth: Optional[AuthContext] = De
     session_id = req.session_id or f"{user_id}:{uuid.uuid4().hex}"
     effective_message, client_history = _derive_message_and_history(req)
     external_system = _merge_external_system(req.persona_system, req.system)
-    attachments_ctx = _build_attachments_context(attachments=req.attachments, auth=auth)
+    effective_gen = _merge_gen_with_tool_policy(req.gen, req.tool_policy)
+    tool_policy = _tool_policy_dict(req.tool_policy)
+    native_attachments = _resolve_native_attachments(attachments=req.attachments, auth=auth) if _should_use_native_attachments(effective_gen) else []
+    native_attachment_ids = _resolved_attachment_ids(native_attachments)
+    attachments_ctx = _build_attachments_context(
+        attachments=req.attachments,
+        auth=auth,
+        skip_attachment_ids=native_attachment_ids,
+    )
     if attachments_ctx:
         effective_message = (effective_message + "\n\n" + attachments_ctx).strip()
 
     overload_score = _estimate_overload_score(effective_message)
 
-    # Intent Router (core-side)
-    try:
-        from persona_core.intent_router import classify_intent
+    intent = _classify_turn_intent(effective_message=effective_message, tool_policy=tool_policy)
 
-        intent = classify_intent(effective_message)
-    except Exception:
-        intent = "general"
-
-    # Fallback: explicit search requests should still trigger Web RAG when enabled.
-    try:
-        if intent == "general" and _web_rag_enabled() and _web_rag_explicit_request(effective_message):
-            intent = "realtime_fact"
-    except Exception:
-        pass
-
-    web_ctx = None
-    web_sources = None
-    web_meta = None
-
-    tool_weather = None
-    tool_comparison = None
-    personalization_hint: Optional[Dict[str, Any]] = None
-
-    if intent == "weather":
-        try:
-            from persona_core.phase04.tools.weather_api import weather_api_flow
-
-            tool_weather = weather_api_flow(effective_message)
-            web_ctx = (
-                "External Tool Context (weather_api).\n"
-                "Usage rules:\n"
-                "- Use this as supporting evidence.\n\n"
-                "tool.weather:\n"
-                + json.dumps(tool_weather, ensure_ascii=False, separators=(",", ":"))
-            )
-            web_sources = []
-            web_meta = {"intent": "weather", "provider": "weather_api"}
-        except Exception:
-            tool_weather = None
-            web_ctx, web_sources, web_meta = (None, None, None)
-    elif intent == "comparison":
-        try:
-            from persona_core.phase04.tools.comparison_flow import comparison_flow
-
-            tool_comparison = comparison_flow(effective_message)
-
-            safe = {}
-            try:
-                if isinstance(tool_comparison, dict):
-                    ia = tool_comparison.get("item_a") if isinstance(tool_comparison.get("item_a"), dict) else None
-                    ib = tool_comparison.get("item_b") if isinstance(tool_comparison.get("item_b"), dict) else None
-                    safe = {
-                        "item_a": {
-                            "name": (ia or {}).get("name"),
-                            "summary": ((ia or {}).get("result") or {}).get("summary") if isinstance((ia or {}).get("result"), dict) else None,
-                            "key_points": ((ia or {}).get("result") or {}).get("key_points") if isinstance((ia or {}).get("result"), dict) else None,
-                        },
-                        "item_b": {
-                            "name": (ib or {}).get("name"),
-                            "summary": ((ib or {}).get("result") or {}).get("summary") if isinstance((ib or {}).get("result"), dict) else None,
-                            "key_points": ((ib or {}).get("result") or {}).get("key_points") if isinstance((ib or {}).get("result"), dict) else None,
-                        },
-                        "differences": tool_comparison.get("differences") if isinstance(tool_comparison.get("differences"), list) else [],
-                    }
-            except Exception:
-                safe = {}
-
-            web_ctx = (
-                "External Tool Context (comparison_flow).\n"
-                "Usage rules:\n"
-                "- Use this as supporting evidence.\n"
-                "- Do NOT invent specs not present.\n\n"
-                "tool.comparison:\n"
-                + json.dumps(safe, ensure_ascii=False, separators=(",", ":"))
-            )
-            web_sources = []
-            web_meta = {"intent": "comparison", "provider": "comparison_flow"}
-        except Exception:
-            tool_comparison = None
-            web_ctx, web_sources, web_meta = (None, None, None)
-    elif intent == "personalized_realtime":
-        try:
-            forced_gen: Optional[Dict[str, Any]] = None
-            try:
-                g0 = req.gen if isinstance(req.gen, dict) else {}
-                forced_gen = dict(g0)
-                web_cfg = forced_gen.get("web_rag")
-                if isinstance(web_cfg, dict):
-                    forced_gen["web_rag"] = {**web_cfg, "enabled": True}
-                else:
-                    forced_gen["web_rag"] = {"enabled": True}
-            except Exception:
-                forced_gen = (req.gen if isinstance(req.gen, dict) else None)
-
-            web_ctx, web_sources, web_meta = await _maybe_web_rag_for_turn(
-                message=effective_message,
-                gen=forced_gen,
-                trace_id=trace_id,
-                session_id=session_id,
-                user_id=str(user_id),
-                persona_db=(SupabasePersonaDB(_supabase) if (_supabase is not None and _is_uuid(str(user_id))) else None),
-            )
-        except Exception:
-            web_ctx, web_sources, web_meta = (None, None, None)
-
-        try:
-            hint_profile: Dict[str, Any] = {"user_id": str(user_id)}
-            if _supabase is not None and _is_uuid(str(user_id)):
-                try:
-                    persona_db2 = SupabasePersonaDB(_supabase)
-                    vs = persona_db2.load_last_value_state(user_id=str(user_id))
-                    ts = persona_db2.load_last_trait_state(user_id=str(user_id))
-                    if vs is not None:
-                        hint_profile["value_state"] = vs.to_dict()
-                    if ts is not None:
-                        hint_profile["trait_state"] = ts.to_dict()
-                except Exception:
-                    pass
-
-            project_type: Optional[str] = None
-            try:
-                if isinstance(req.gen, dict):
-                    for k in ("project_type", "app", "channel", "client"):
-                        v = req.gen.get(k)
-                        if isinstance(v, str) and v.strip():
-                            project_type = v.strip()
-                            break
-            except Exception:
-                project_type = None
-
-            personalization_hint = {
-                "user_profile": hint_profile,
-                "project_type": project_type,
-            }
-        except Exception:
-            personalization_hint = None
-    elif intent == "realtime_fact":
-        try:
-            forced_gen: Optional[Dict[str, Any]] = None
-            try:
-                g0 = req.gen if isinstance(req.gen, dict) else {}
-                forced_gen = dict(g0)
-                web_cfg = forced_gen.get("web_rag")
-                if isinstance(web_cfg, dict):
-                    forced_gen["web_rag"] = {**web_cfg, "enabled": True}
-                else:
-                    forced_gen["web_rag"] = {"enabled": True}
-            except Exception:
-                forced_gen = (req.gen if isinstance(req.gen, dict) else None)
-
-            web_ctx, web_sources, web_meta = await _maybe_web_rag_for_turn(
-                message=effective_message,
-                gen=forced_gen,
-                trace_id=trace_id,
-                session_id=session_id,
-                user_id=str(user_id),
-                persona_db=(SupabasePersonaDB(_supabase) if (_supabase is not None and _is_uuid(str(user_id))) else None),
-            )
-        except Exception:
-            web_ctx, web_sources, web_meta = (None, None, None)
+    resolved_ctx = await _resolve_turn_external_context(
+        intent=intent,
+        effective_message=effective_message,
+        effective_gen=(effective_gen if isinstance(effective_gen, dict) else {}),
+        tool_policy=tool_policy,
+        trace_id=trace_id,
+        session_id=session_id,
+        user_id=str(user_id),
+    )
+    web_ctx = resolved_ctx["web_ctx"]
+    web_sources = resolved_ctx["web_sources"]
+    web_meta = resolved_ctx["web_meta"]
+    tool_weather = resolved_ctx["tool_weather"]
+    tool_comparison = resolved_ctx["tool_comparison"]
+    personalization_hint = resolved_ctx["personalization_hint"]
 
     preq = PersonaRequest(
         user_id=user_id,
@@ -2837,131 +3490,116 @@ async def persona_chat_stream(req: ChatRequest, auth: Optional[AuthContext] = De
             **({"_personalization_hint": personalization_hint} if isinstance(personalization_hint, dict) and personalization_hint else {}),
             **({"_tool_weather": tool_weather} if isinstance(tool_weather, dict) and tool_weather else {}),
             **({"_comparison": tool_comparison} if isinstance(tool_comparison, dict) and tool_comparison else {}),
+            **({"_attachments": req.attachments} if isinstance(req.attachments, list) and req.attachments else {}),
+            **({"_native_input_attachments": native_attachments} if native_attachments else {}),
             **({"character_id": req.character_id} if req.character_id else {}),
             **({"persona_system": external_system} if external_system else {}),
             **({"_external_knowledge": web_ctx} if isinstance(web_ctx, str) and web_ctx.strip() else {}),
             **({"_web_rag_sources": web_sources} if isinstance(web_sources, list) and web_sources else {}),
             **({"_web_rag_meta": web_meta} if isinstance(web_meta, dict) and web_meta else {}),
-            **({"gen": req.gen} if isinstance(req.gen, dict) and req.gen else {}),
+            **({"gen": effective_gen} if isinstance(effective_gen, dict) and effective_gen else {}),
+            **({"_tool_policy": tool_policy} if tool_policy else {}),
             **({"client_history": client_history} if client_history else {}),
         },
     )
 
-    phase04_db: Any = None
-
-    baseline_from_client: Optional[TraitState] = None
-    try:
-        if isinstance(req.trait_baseline, dict):
-            baseline_from_client = TraitState(
-                calm=float(req.trait_baseline.get("calm", 0.5)),
-                empathy=float(req.trait_baseline.get("empathy", 0.5)),
-                curiosity=float(req.trait_baseline.get("curiosity", 0.5)),
-            )
-    except Exception:
-        baseline_from_client = None
-
-    # wire controller (same as /persona/chat)
-    if _supabase is not None:
-        llm_client = _get_llm_client()
-        embedding_model = llm_client
-        persona_db = SupabasePersonaDB(_supabase)
-        phase04_db = persona_db
-        init_states = await _load_supabase_initial_states(persona_db=persona_db, user_id=user_id)
-
-        # Phase02: operator overrides (best-effort)
-        try:
-            op = init_states.get("op")
-            payload = (op or {}).get("payload") if isinstance(op, dict) else None
-            if isinstance(payload, dict):
-                mode = payload.get("subjectivity_mode")
-                freeze = payload.get("freeze_updates")
-                if isinstance(mode, str) and mode.strip():
-                    preq.metadata["_operator_subjectivity_mode"] = mode.strip()
-                if isinstance(freeze, bool):
-                    preq.metadata["_freeze_updates"] = bool(preq.metadata.get("_freeze_updates") or freeze)
-        except Exception:
-            pass
-
-        init_value = init_states.get("value") if isinstance(init_states.get("value"), ValueState) else ValueState()
-        init_trait = init_states.get("trait") if isinstance(init_states.get("trait"), TraitState) else TraitState()
-        init_ego: Optional[EgoContinuityState] = None
-        try:
-            st = init_states.get("ego")
-            if isinstance(st, dict):
-                init_ego = EgoContinuityState.from_dict(st)
-        except Exception:
-            init_ego = None
-        init_tid: Optional[TemporalIdentityState] = None
-        try:
-            st = init_states.get("tid")
-            if isinstance(st, dict):
-                init_tid = TemporalIdentityState.from_dict(st)
-        except Exception:
-            init_tid = None
-        episode_store = SupabaseEpisodeStore(_supabase, user_id=user_id, character_id=req.character_id)
-
-        selective_recall = SelectiveRecall(memory_backend=episode_store, embedding_model=embedding_model)
-        ambiguity_resolver = AmbiguityResolver(embedding_model=embedding_model)
-        episode_merger = EpisodeMerger(memory_backend=episode_store)
-        memory_orchestrator = MemoryOrchestrator(
-            selective_recall=selective_recall,
-            episode_merger=episode_merger,
-            ambiguity_resolver=ambiguity_resolver,
-        )
-
-        controller = PersonaController(
-            config=PersonaControllerConfig(default_user_id=None),
-            memory_orchestrator=memory_orchestrator,
-            identity_engine=IdentityContinuityEngineV3(),
-            value_engine=ValueDriftEngine(),
-            trait_engine=TraitDriftEngine(),
-            global_fsm=GlobalStateMachine(),
-            episode_store=episode_store,
-            persona_db=persona_db,
-            llm_client=llm_client,
-            initial_value_state=init_value,
-            initial_trait_state=init_trait,
-            initial_trait_baseline=baseline_from_client or init_trait,
-            initial_ego_state=init_ego,
-            initial_temporal_identity_state=init_tid,
-        )
-
-        safety_layer = _get_safety_layer(embedding_model=embedding_model)
-        safety = safety_layer.assess(
-            req=preq,
-            value_state=init_value,
-            trait_state=init_trait,
-            memory=None,
-        )
-
-    else:
-        try:
-            controller = _get_inmemory_controller()
-        except RuntimeError as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-        llm_client = _get_llm_client()
-        safety_layer = _get_safety_layer(embedding_model=llm_client)
-        safety = safety_layer.assess(
-            req=preq,
-            value_state=ValueState(),
-            trait_state=TraitState(),
-            memory=None,
-        )
-        phase04_db = None
-
-    # SafetyLayer の数値メタを controller 側でも参照できるように注入
-    try:
-        if isinstance(getattr(preq, "metadata", None), dict):
-            preq.metadata["_safety_risk_score"] = float(getattr(safety, "risk_score", 0.0) or 0.0)
-            preq.metadata["_safety_flag"] = getattr(safety, "safety_flag", None)
-            preq.metadata["_safety_categories"] = getattr(safety, "categories", {}) or {}
-    except Exception:
-        pass
-
     def _sse(event: str, data: Any) -> str:
         payload = json.dumps(data, ensure_ascii=False)
         return f"event: {event}\ndata: {payload}\n\n"
+
+    try:
+        llm_client = _get_llm_client()
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    phase04_db: Any = SupabasePersonaDB(_supabase) if _supabase is not None else None
+    quick_safety = _assess_request_safety_quick(req=preq, embedding_model=llm_client)
+    if _should_use_lightweight_turn(
+        req=req,
+        intent=intent,
+        effective_message=effective_message,
+        web_ctx=web_ctx,
+        tool_weather=tool_weather,
+        tool_comparison=tool_comparison,
+        personalization_hint=personalization_hint,
+        safety_flag=getattr(quick_safety, "safety_flag", None),
+    ):
+        try:
+            if isinstance(getattr(preq, "metadata", None), dict):
+                preq.metadata["_safety_risk_score"] = float(getattr(quick_safety, "risk_score", 0.0) or 0.0)
+                preq.metadata["_safety_flag"] = getattr(quick_safety, "safety_flag", None)
+                preq.metadata["_safety_categories"] = getattr(quick_safety, "categories", {}) or {}
+        except Exception:
+            pass
+        _enqueue_safety_assessment(
+            trace_id=trace_id,
+            user_id=str(user_id),
+            session_id=session_id,
+            safety=quick_safety,
+        )
+        lightweight_gen = dict(effective_gen) if isinstance(effective_gen, dict) else {}
+        if native_attachments:
+            lightweight_gen["_native_input_attachments"] = native_attachments
+        system_prompt = _build_lightweight_system_prompt(
+            external_system=external_system,
+            web_ctx=web_ctx if isinstance(web_ctx, str) else None,
+        )
+
+        def lightweight_event_stream():
+            yield _sse("start", {"trace_id": trace_id, "session_id": session_id})
+            parts: List[str] = []
+            try:
+                for chunk in llm_client.generate_stream_direct(
+                    system_prompt=system_prompt,
+                    user_text=effective_message,
+                    history=client_history,
+                    gen=lightweight_gen,
+                    user=str(user_id),
+                    audit_ctx={
+                        "user_id": str(user_id),
+                        "session_id": str(session_id),
+                        "trace_id": trace_id,
+                    },
+                ):
+                    if not chunk:
+                        continue
+                    parts.append(str(chunk))
+                    yield _sse("delta", {"text": str(chunk)})
+            except Exception as e:
+                yield _sse("error", {"error": str(e)})
+                return
+
+            reply_text = "".join(parts).strip()
+            phase04_meta = _kick_phase04_postprocess(
+                user_id=user_id,
+                session_id=session_id,
+                message=effective_message,
+                trace_id=trace_id,
+                persist=phase04_db,
+                attachments=req.attachments if isinstance(req.attachments, list) else None,
+            )
+            meta = _lightweight_meta(
+                trace_id=trace_id,
+                t0=t0,
+                intent=intent,
+                safety=quick_safety,
+                phase04_meta=phase04_meta,
+                reply_text=reply_text,
+                lightweight_reason="general_fast_path",
+            )
+            yield _sse("done", {"reply": reply_text, "meta": meta})
+
+        return StreamingResponse(lightweight_event_stream(), media_type="text/event-stream")
+
+    runtime = await _build_controller_runtime(
+        req=req,
+        preq=preq,
+        user_id=user_id,
+        baseline_from_client=_parse_trait_baseline(req),
+    )
+    controller = runtime["controller"]
+    safety = runtime["safety"]
+    phase04_db = runtime["phase04_db"]
 
     def event_stream():
         try:
@@ -2999,6 +3637,7 @@ async def persona_chat_stream(req: ChatRequest, auth: Optional[AuthContext] = De
                         "config_hash": str(CONFIG_HASH),
                         "trace_id": trace_id,
                         "intent": v0.get("intent") or {},
+                        "intent_route": str(intent or "general"),
                         "dialogue_state": v0.get("dialogue_state") or "UNKNOWN",
                         "telemetry": v0.get("telemetry") or {"C": 0.0, "N": 0.0, "M": 0.0, "S": 0.0, "R": 0.0},
                         "decision_candidates": decision_candidates,
@@ -3033,18 +3672,34 @@ async def persona_chat_stream(req: ChatRequest, auth: Optional[AuthContext] = De
                         "phase04": None,
                     }
 
-                    try:
-                        rt = get_phase04_runtime()
-                        meta["phase04"] = rt.run_for_turn(
-                            user_id=user_id,
-                            session_id=session_id,
-                            message=effective_message,
-                            trace_id=trace_id,
-                            persist=phase04_db,
-                            attachments=req.attachments if isinstance(req.attachments, list) else None,
-                        )
-                    except Exception:
-                        meta["phase04"] = {"error": "phase04_failed"}
+                    attachments_for_phase04 = req.attachments if isinstance(req.attachments, list) else None
+                    if _defer_phase04_postprocess_enabled():
+                        meta["phase04"] = {"deferred": True}
+                        threading.Thread(
+                            target=_run_phase04_for_turn_async,
+                            kwargs={
+                                "user_id": user_id,
+                                "session_id": session_id,
+                                "message": effective_message,
+                                "trace_id": trace_id,
+                                "persist": phase04_db,
+                                "attachments": attachments_for_phase04,
+                            },
+                            daemon=True,
+                        ).start()
+                    else:
+                        try:
+                            rt = get_phase04_runtime()
+                            meta["phase04"] = rt.run_for_turn(
+                                user_id=user_id,
+                                session_id=session_id,
+                                message=effective_message,
+                                trace_id=trace_id,
+                                persist=phase04_db,
+                                attachments=attachments_for_phase04,
+                            )
+                        except Exception:
+                            meta["phase04"] = {"error": "phase04_failed"}
 
                     persona_runtime = _extract_persona_runtime_meta(req.gen)
                     if persona_runtime:
@@ -3085,6 +3740,7 @@ async def persona_chat_stream(req: ChatRequest, auth: Optional[AuthContext] = De
                     meta["meta_v1"] = {
                         "trace_id": str(meta.get("trace_id") or trace_id),
                         "intent": meta.get("intent") or {},
+                        "intent_route": str(meta.get("intent_route") or intent or "general"),
                         "dialogue_state": str(meta.get("dialogue_state") or "UNKNOWN"),
                         "telemetry": meta.get("telemetry")
                         or {"C": 0.0, "N": 0.0, "M": 0.0, "S": 0.0, "R": 0.0},
@@ -4143,3 +4799,4 @@ async def io_github_code_search(
             except Exception:
                 pass
         raise HTTPException(status_code=502, detail=str(e))
+

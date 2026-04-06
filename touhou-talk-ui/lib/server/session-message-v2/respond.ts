@@ -1,11 +1,23 @@
 import { NextResponse } from "next/server";
 
 import type { supabaseServer } from "@/lib/supabase-server";
+import { CHARACTERS } from "@/data/characters";
 import type { TouhouChatMode } from "@/lib/touhouPersona";
-import { mergeMeta, isRecord } from "@/lib/server/session-message/meta";
+import {
+  mergeMeta,
+  isRecord,
+  summarizeCoreRoutingMeta,
+  withTtsReadingMeta,
+} from "@/lib/server/session-message/meta";
+import { generateTtsReadingText } from "@/lib/server/session-message/tts-reading";
+import {
+  buildVrmPerformanceCue,
+  toVrmPerformanceMeta,
+} from "@/lib/vrm/performanceDirector";
 import type {
   PersonaChatResponse,
   PersonaIntentResponse,
+  PersonaToolPolicy,
 } from "@/lib/server/session-message-v2/types";
 import {
   effectiveOutputStyle,
@@ -19,6 +31,12 @@ import {
 } from "@/lib/server/session-message-v2/persistence";
 import { updateRelationshipAndMemoryBestEffort } from "@/lib/server/session-message-v2/relationship";
 
+function runPostReplyTasks(task: () => Promise<void>) {
+  void task().catch((error) => {
+    console.warn("[touhou] post-reply task failed:", error);
+  });
+}
+
 export async function handleNonStreamSessionMessage(params: {
   supabase: Awaited<ReturnType<typeof supabaseServer>>;
   sessionId: string;
@@ -28,7 +46,6 @@ export async function handleNonStreamSessionMessage(params: {
   chatMode: TouhouChatMode;
   characterId: string;
   text: string;
-  augmentedText: string;
   coreHistory: Array<{ role: "user" | "assistant"; content: string }>;
   coreAttachments: Record<string, unknown>[];
   personaSystemWithRetrieval: string;
@@ -37,6 +54,21 @@ export async function handleNonStreamSessionMessage(params: {
   intent: PersonaIntentResponse | null;
   isSeedTurn: boolean;
 }) {
+  const enrichedGen = {
+    ...params.gen,
+    multimodal: {
+      mode: "sdk_first" as const,
+      attachment_count: params.coreAttachments.length,
+      client_augmented_text_present: false,
+    },
+  };
+  const toolPolicy: PersonaToolPolicy = {
+    attachment_mode: "sdk_first",
+    web_search_mode: "auto",
+    allow_web_search: true,
+    prefer_native_attachments: true,
+  };
+
   const r = await fetch(`${params.base}/persona/chat`, {
     method: "POST",
     headers: {
@@ -48,13 +80,14 @@ export async function handleNonStreamSessionMessage(params: {
     body: JSON.stringify({
       user_id: params.userId,
       session_id: params.sessionId,
-      message: params.augmentedText,
+      message: params.text,
       history: params.coreHistory,
       character_id: params.characterId,
       chat_mode: params.chatMode,
       persona_system: params.personaSystemWithRetrieval,
-      gen: params.gen,
+      gen: enrichedGen,
       attachments: params.coreAttachments,
+      tool_policy: toolPolicy,
     }),
   });
 
@@ -121,11 +154,23 @@ export async function handleNonStreamSessionMessage(params: {
     }
   }
 
-  const mergedMeta = mergeMeta(data.meta ?? null, {
+  const ttsReading = await generateTtsReadingText({
+    characterId: params.characterId,
+    replyText: replyFinal,
+  });
+
+  let mergedMeta = mergeMeta(data.meta ?? null, {
     persona_system_sha256: params.personaSystemSha256,
     chat_mode: params.chatMode,
     character_id: params.characterId,
+    speaker: {
+      kind: "ai_character",
+      character_id: params.characterId,
+      display_name: CHARACTERS[params.characterId]?.name ?? params.characterId,
+      title: CHARACTERS[params.characterId]?.title ?? null,
+    },
     seed_turn: params.isSeedTurn,
+    core_routing: summarizeCoreRoutingMeta(data.meta ?? null),
     ...(params.intent
       ? {
           director_overlay: true,
@@ -142,6 +187,31 @@ export async function handleNonStreamSessionMessage(params: {
           forced_output_style_reason: forcedStyleReason,
         }
       : { director_overlay: false }),
+  });
+  mergedMeta = withTtsReadingMeta(
+    mergedMeta,
+    ttsReading.readingText,
+    ttsReading.model,
+  );
+  mergedMeta = mergeMeta(mergedMeta, {
+    vrm_performance: toVrmPerformanceMeta(
+      buildVrmPerformanceCue({
+        characterId: params.characterId,
+        text: replyFinal,
+        messageId: params.sessionId,
+        speaking: false,
+      }),
+    ),
+  });
+
+  const coreRouting = summarizeCoreRoutingMeta(data.meta ?? null);
+  console.info("[touhou] core route summary:", {
+    sessionId: params.sessionId,
+    traceId:
+      isRecord(data.meta) && typeof data.meta.trace_id === "string"
+        ? data.meta.trace_id
+        : null,
+    ...coreRouting,
   });
 
   const aiInsertError = await saveAssistantMessage({
@@ -161,29 +231,31 @@ export async function handleNonStreamSessionMessage(params: {
     );
   }
 
-  if (isRecord(mergedMeta)) {
-    const snapshotError = await saveStateSnapshot({
-      supabase: params.supabase,
-      userId: params.userId,
-      sessionId: params.sessionId,
-      meta: mergedMeta as Record<string, unknown>,
-    });
+  runPostReplyTasks(async () => {
+    if (isRecord(mergedMeta)) {
+      const snapshotError = await saveStateSnapshot({
+        supabase: params.supabase,
+        userId: params.userId,
+        sessionId: params.sessionId,
+        meta: mergedMeta as Record<string, unknown>,
+      });
 
-    if (snapshotError) {
-      console.warn("[touhou] state snapshot insert failed:", snapshotError);
+      if (snapshotError) {
+        console.warn("[touhou] state snapshot insert failed:", snapshotError);
+      }
     }
-  }
 
-  await updateRelationshipAndMemoryBestEffort({
-    supabase: params.supabase,
-    base: params.base,
-    accessToken: params.accessToken,
-    sessionId: params.sessionId,
-    userId: params.userId,
-    characterId: params.characterId,
-    chatMode: params.chatMode,
-    userText: params.text,
-    assistantText: replyFinal,
+    await updateRelationshipAndMemoryBestEffort({
+      supabase: params.supabase,
+      base: params.base,
+      accessToken: params.accessToken,
+      sessionId: params.sessionId,
+      userId: params.userId,
+      characterId: params.characterId,
+      chatMode: params.chatMode,
+      userText: params.text,
+      assistantText: replyFinal,
+    });
   });
 
   return NextResponse.json({

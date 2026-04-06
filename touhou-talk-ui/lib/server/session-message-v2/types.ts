@@ -10,6 +10,13 @@ export type SessionMessageStage =
 
 export type PersonaChatResponse = { reply: string; meta?: Record<string, unknown> };
 
+export type PersonaToolPolicy = {
+  attachment_mode?: "context_only" | "sdk_first";
+  web_search_mode?: "off" | "auto" | "required";
+  allow_web_search?: boolean;
+  prefer_native_attachments?: boolean;
+};
+
 export type PersonaIntentLabel =
   | "banter"
   | "chitchat"
@@ -85,6 +92,8 @@ export type ParsedSessionMessageRequestBody = {
   characterId: string;
   text: string;
   coreModeRaw: FormDataEntryValue | null;
+  sceneMode: "chat" | "continue";
+  sceneTurnCount: number;
   files: File[];
   urls: string[];
 };

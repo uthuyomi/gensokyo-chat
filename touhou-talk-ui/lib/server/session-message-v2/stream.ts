@@ -1,9 +1,23 @@
 import { NextResponse } from "next/server";
 
 import type { supabaseServer } from "@/lib/supabase-server";
+import { CHARACTERS } from "@/data/characters";
 import type { TouhouChatMode } from "@/lib/touhouPersona";
-import { mergeMeta, isRecord } from "@/lib/server/session-message/meta";
-import type { PersonaIntentResponse } from "@/lib/server/session-message-v2/types";
+import {
+  mergeMeta,
+  isRecord,
+  summarizeCoreRoutingMeta,
+  withTtsReadingMeta,
+} from "@/lib/server/session-message/meta";
+import { generateTtsReadingText } from "@/lib/server/session-message/tts-reading";
+import {
+  buildVrmPerformanceCue,
+  toVrmPerformanceMeta,
+} from "@/lib/vrm/performanceDirector";
+import type {
+  PersonaIntentResponse,
+  PersonaToolPolicy,
+} from "@/lib/server/session-message-v2/types";
 import {
   toSse,
   effectiveOutputStyle,
@@ -17,6 +31,12 @@ import {
 } from "@/lib/server/session-message-v2/persistence";
 import { updateRelationshipAndMemoryBestEffort } from "@/lib/server/session-message-v2/relationship";
 
+function runPostReplyTasks(task: () => Promise<void>) {
+  void task().catch((error) => {
+    console.warn("[touhou] post-reply task failed:", error);
+  });
+}
+
 export async function handleStreamSessionMessage(params: {
   supabase: Awaited<ReturnType<typeof supabaseServer>>;
   sessionId: string;
@@ -26,7 +46,6 @@ export async function handleStreamSessionMessage(params: {
   chatMode: TouhouChatMode;
   characterId: string;
   text: string;
-  augmentedText: string;
   coreHistory: Array<{ role: "user" | "assistant"; content: string }>;
   coreAttachments: Record<string, unknown>[];
   personaSystemWithRetrieval: string;
@@ -35,6 +54,21 @@ export async function handleStreamSessionMessage(params: {
   intent: PersonaIntentResponse | null;
   isSeedTurn: boolean;
 }) {
+  const enrichedGen = {
+    ...params.gen,
+    multimodal: {
+      mode: "sdk_first" as const,
+      attachment_count: params.coreAttachments.length,
+      client_augmented_text_present: false,
+    },
+  };
+  const toolPolicy: PersonaToolPolicy = {
+    attachment_mode: "sdk_first",
+    web_search_mode: "auto",
+    allow_web_search: true,
+    prefer_native_attachments: true,
+  };
+
   let upstream: Response;
 
   try {
@@ -49,13 +83,14 @@ export async function handleStreamSessionMessage(params: {
       body: JSON.stringify({
         user_id: params.userId,
         session_id: params.sessionId,
-        message: params.augmentedText,
+        message: params.text,
         history: params.coreHistory,
         character_id: params.characterId,
         chat_mode: params.chatMode,
         persona_system: params.personaSystemWithRetrieval,
-        gen: params.gen,
+        gen: enrichedGen,
         attachments: params.coreAttachments,
+        tool_policy: toolPolicy,
       }),
     });
   } catch (e) {
@@ -91,6 +126,12 @@ export async function handleStreamSessionMessage(params: {
   const touhouUiMeta = {
     chat_mode: params.chatMode,
     character_id: params.characterId,
+    speaker: {
+      kind: "ai_character",
+      character_id: params.characterId,
+      display_name: CHARACTERS[params.characterId]?.name ?? params.characterId,
+      title: CHARACTERS[params.characterId]?.title ?? null,
+    },
     persona_system_sha256: params.personaSystemSha256,
     seed_turn: params.isSeedTurn,
     ...(params.intent
@@ -167,6 +208,23 @@ export async function handleStreamSessionMessage(params: {
                 isRecord(parsed) && isRecord(parsed.meta)
                   ? mergeMeta(parsed.meta, touhouUiMeta)
                   : mergeMeta(null, touhouUiMeta);
+              const coreRouting =
+                isRecord(parsed) && isRecord(parsed.meta)
+                  ? summarizeCoreRoutingMeta(parsed.meta)
+                  : summarizeCoreRoutingMeta(null);
+              finalMeta = mergeMeta(finalMeta, {
+                core_routing: coreRouting,
+              });
+              console.info("[touhou] core route summary:", {
+                sessionId: params.sessionId,
+                traceId:
+                  isRecord(parsed) &&
+                  isRecord(parsed.meta) &&
+                  typeof parsed.meta.trace_id === "string"
+                    ? parsed.meta.trace_id
+                    : null,
+                ...coreRouting,
+              });
 
               const replyGuarded = sanitizeReplyByContext({
                 characterId: params.characterId,
@@ -225,6 +283,26 @@ export async function handleStreamSessionMessage(params: {
                 });
               }
 
+              const ttsReading = await generateTtsReadingText({
+                characterId: params.characterId,
+                replyText: replyFinal,
+              });
+              finalMeta = withTtsReadingMeta(
+                finalMeta,
+                ttsReading.readingText,
+                ttsReading.model,
+              );
+              finalMeta = mergeMeta(finalMeta, {
+                vrm_performance: toVrmPerformanceMeta(
+                  buildVrmPerformanceCue({
+                    characterId: params.characterId,
+                    text: replyFinal,
+                    messageId: params.sessionId,
+                    speaking: false,
+                  }),
+                ),
+              });
+
               replyAcc = replyFinal;
               await writer.write(
                 toSse("done", { reply: replyFinal, meta: finalMeta }),
@@ -259,6 +337,17 @@ export async function handleStreamSessionMessage(params: {
           currentUserText: params.text,
         });
 
+      } catch (e) {
+        console.warn("[touhou] persist ai message failed:", e);
+      }
+
+      try {
+        await writer.close();
+      } catch {
+        // ignore
+      }
+
+      runPostReplyTasks(async () => {
         const aiInsertError = await saveAssistantMessage({
           supabase: params.supabase,
           sessionId: params.sessionId,
@@ -271,11 +360,7 @@ export async function handleStreamSessionMessage(params: {
         if (aiInsertError) {
           console.warn("[touhou] persist ai message failed:", aiInsertError);
         }
-      } catch (e) {
-        console.warn("[touhou] persist ai message failed:", e);
-      }
 
-      try {
         if (isRecord(finalMeta)) {
           const snapshotError = await saveStateSnapshot({
             supabase: params.supabase,
@@ -291,11 +376,7 @@ export async function handleStreamSessionMessage(params: {
             );
           }
         }
-      } catch (e) {
-        console.warn("[touhou] state snapshot insert failed:", e);
-      }
 
-      try {
         await updateRelationshipAndMemoryBestEffort({
           supabase: params.supabase,
           base: params.base,
@@ -307,15 +388,7 @@ export async function handleStreamSessionMessage(params: {
           userText: params.text,
           assistantText: replyGuarded,
         });
-      } catch {
-        // ignore
-      }
-
-      try {
-        await writer.close();
-      } catch {
-        // ignore
-      }
+      });
     }
   })();
 

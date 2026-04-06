@@ -1,4 +1,11 @@
+﻿"use client";
+
+import { useLanguage } from "@/components/i18n/LanguageProvider";
+
 export default function EntryInfoSection() {
+  const { t, tList } = useLanguage();
+  const flowItems = tList("entry.infoCards.flowItems");
+
   return (
     <section
       id="entry-info"
@@ -6,68 +13,43 @@ export default function EntryInfoSection() {
       className="mx-auto mt-10 w-full max-w-6xl space-y-4"
     >
       <div className="space-y-1">
-        <h2 className="text-xl font-semibold tracking-wide">はじめに</h2>
+        <h2 className="text-xl font-semibold tracking-wide">{t("entry.infoTitle")}</h2>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-sm">
-          <div className="text-sm font-semibold">遊び方</div>
+          <div className="text-sm font-semibold">{t("entry.infoCards.flowTitle")}</div>
           <ol className="mt-3 space-y-2 text-sm text-muted-foreground">
-            <li>1. キャラクターを選択</li>
-            <li>2. ログイン</li>
-            <li>3. 会話を開始</li>
+            {flowItems.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
           </ol>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-sm">
-          <div className="text-sm font-semibold">ロールプレイ方針</div>
+          <div className="text-sm font-semibold">{t("entry.infoCards.roleplayTitle")}</div>
           <div className="mt-3 text-sm leading-relaxed text-muted-foreground">
-            口調や雰囲気の再現を優先します。キャラクターごとに距離感やテンポが異なるため、相性の良い相手をお試しください。
+            {t("entry.infoCards.roleplayBody")}
           </div>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-sm">
-          <div className="text-sm font-semibold">推奨環境</div>
+          <div className="text-sm font-semibold">{t("entry.infoCards.environmentTitle")}</div>
           <div className="mt-3 text-sm leading-relaxed text-muted-foreground">
-            PC / タブレット / スマートフォンに対応しています。Chrome / Safari
-            の最新版を推奨します。
+            {t("entry.infoCards.environmentBody")}
           </div>
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-sm">
-          <div className="text-sm font-semibold">運営について</div>
+          <div className="text-sm font-semibold">{t("entry.infoCards.notesTitle")}</div>
           <div className="mt-3 text-sm leading-relaxed text-muted-foreground">
-            本サービスは個人の負担で運営しております。混雑状況により、一時的に提供を停止する場合がございます。あらかじめご了承ください。
+            {t("entry.infoCards.notesBody")}
           </div>
         </div>
-        <div className="rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-sm">
-          <div className="text-sm font-semibold">プロンプト版の見方</div>
-          <div className="mt-3 space-y-3 text-sm leading-relaxed text-muted-foreground">
-            <p>
-              キャラカードに表示される{" "}
-              <code className="rounded bg-muted px-1 py-0.5">B-YYYYMMDD</code>{" "}
-              /{" "}
-              <code className="rounded bg-muted px-1 py-0.5">beta</code>
-              は、ロールプレイ用プロンプトの調整状態を表します（現状は{" "}
-              <span className="font-medium text-foreground/80">2種類</span>）。
-            </p>
 
-            <ul className="ml-4 list-disc space-y-1">
-              <li>
-                <code className="rounded bg-muted px-1 py-0.5">B-YYYYMMDD</code>
-                ：作り込み済み（再現度優先／会話の崩れを抑えるガード込み）
-              </li>
-              <li>
-                <code className="rounded bg-muted px-1 py-0.5">beta</code>
-                ：調整中のベータ表記です（今後内容が変わる場合があります）
-              </li>
-            </ul>
-
-            <p>
-              <span className="font-medium text-foreground/80">YYYYMMDD</span>{" "}
-              は更新日です（例：{" "}
-              <code className="rounded bg-muted px-1 py-0.5">B-20260305</code>
-              ）。
-            </p>
+        <div className="rounded-2xl border border-border bg-card p-5 text-card-foreground shadow-sm sm:col-span-2 lg:col-span-2">
+          <div className="text-sm font-semibold">{t("entry.infoCards.versionTitle")}</div>
+          <div className="mt-3 text-sm leading-relaxed text-muted-foreground">
+            {t("entry.infoCards.versionBody")}
           </div>
         </div>
       </div>

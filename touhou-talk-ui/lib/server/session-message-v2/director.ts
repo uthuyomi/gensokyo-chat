@@ -163,6 +163,8 @@ export function reimuDirectorOverlay(intent: PersonaIntentResponse): string {
     "# Behavior (FORCED)",
     "- ユーザーの精神状態を推測/分析して断定しない（心理分析っぽい説明は禁止）。",
     "- 余計な一言（決め台詞の暴発）を入れない。脈絡がある時だけ言う。",
+    "- まず返答や反応を出す。確認質問は本当に必要な時だけ1つに絞る。",
+    "- 毎ターン『どう思う』『どうしたい』『何を求めてる』で締めない。",
   ];
 
   if (intent.intent === "meta") {
@@ -201,7 +203,7 @@ export function reimuDirectorOverlay(intent: PersonaIntentResponse): string {
       "",
       "# Roleplay scene handling",
       "- 情景は短く。地の文で長く語らない。",
-      "- 会話を前に進める質問で止める。",
+      "- 会話を前に進める反応や一手を優先し、質問で止めるのは必要な時だけ。",
     );
   } else if (intent.intent === "task" || intent.intent === "advice") {
     base.push(
@@ -209,7 +211,7 @@ export function reimuDirectorOverlay(intent: PersonaIntentResponse): string {
       "# Advice/task handling",
       "- 実務的に。3手まで。感情の断定/心理分析/長文はしない。",
       "- 候補列挙や手順は最大3つ。4つ以上は出さない。",
-      "- 質問は1つだけ。心情の二択/三択で分類させない（事実を1つ聞く）。",
+      "- 質問は1つだけ。まず提案や手順を出し、足りない事実がある時だけ聞く。",
     );
   } else if (intent.intent === "banter") {
     base.push(
@@ -222,7 +224,7 @@ export function reimuDirectorOverlay(intent: PersonaIntentResponse): string {
     base.push(
       "",
       "# Default handling",
-      "- 受け→短い確認→必要なら最小3手→質問で止める。",
+      "- 受け→短い返答/提案→必要なら最小3手。質問で止めるのを基本形にしない。",
     );
   }
 

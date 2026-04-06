@@ -1,46 +1,40 @@
 /**
- * この API Route の役割
- * ---------------------
- * - 新しいチャットセッションを作成する（POST）
- * - 既存のチャットセッション一覧を返す（GET）
+ * Session list / creation API for Touhou Talk.
  *
- * 仕様（Auth + RLS 正規）：
- * - conversations テーブルに永続化
- * - user_id は Supabase Auth (auth.uid)
- * - RLS 前提（user_id = auth.uid()）
- *
- * 設計原則：
- * - session が会話の唯一の真実源
- * - character / location / layer は session に従属
+ * This route now supports mixed rooms:
+ * - owner human + multiple AI characters
+ * - owner human + invited human emails/userIds + AI characters
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseServer, requireUserId } from "@/lib/supabase-server";
 
-function looksLikeMissingColumn(err: unknown, column: string) {
-  const msg =
-    (typeof (err as { message?: unknown } | null)?.message === "string"
-      ? String((err as { message?: unknown }).message)
-      : "") || String(err ?? "");
-  return msg.includes(column) && (msg.includes("column") || msg.includes("schema"));
-}
-
-/* =========================
-   型定義
-========================= */
+import { requireUser } from "@/lib/supabase-server";
+import { listAccessibleTouhouSessions } from "@/lib/rooms/access";
+import {
+  buildSessionParticipants,
+  getPrimaryAiCharacterId,
+  normalizeRoomParticipants,
+  type RoomParticipant,
+} from "@/lib/rooms/participants";
+import { supabaseAdmin } from "@/lib/supabase-server";
 
 type SessionMode = "single" | "group";
 type ChatMode = "partner" | "roleplay" | "coach";
 
 type CreateSessionRequest = {
-  characterId: string;
+  characterId?: string;
+  participantCharacterIds?: string[];
+  invitedHumans?: Array<{
+    userId?: string | null;
+    displayName?: string | null;
+    email?: string | null;
+  }>;
   mode?: SessionMode;
   layer?: string;
   location?: string;
   chatMode?: ChatMode;
 };
 
-/** conversations テーブルの行 */
 type ConversationRow = {
   id: string;
   title: string | null;
@@ -49,10 +43,10 @@ type ConversationRow = {
   layer: string | null;
   location: string | null;
   chat_mode: ChatMode | null;
+  meta: Record<string, unknown> | null;
   created_at: string;
 };
 
-/** フロント（ChatClient）用 */
 export type SessionSummary = {
   id: string;
   title: string;
@@ -61,6 +55,8 @@ export type SessionSummary = {
   layer: string | null;
   location: string | null;
   chatMode: ChatMode;
+  participants: RoomParticipant[];
+  meta?: Record<string, unknown> | null;
   createdAt: string;
 };
 
@@ -68,102 +64,110 @@ type CreateSessionResponse = {
   sessionId: string;
 };
 
-/* =========================
-   GET /api/session
-   - セッション一覧取得
-========================= */
-
 export async function GET(req: NextRequest) {
   try {
-    console.log("[/api/session][GET] cookie:", req.headers.get("cookie"));
+    const user = await requireUser();
+    const sessions = await listAccessibleTouhouSessions({ user, limit: 200 });
 
-    const supabase = await supabaseServer();
-    const userId = await requireUserId();
+    const response: SessionSummary[] = sessions.map((row) => ({
+      id: row.id,
+      title: row.title ?? "新しい会話",
+      characterId: row.character_id ?? "",
+      mode: row.mode ?? "single",
+      layer: row.layer,
+      location: row.location,
+      chatMode: (row.chat_mode ?? "partner") as ChatMode,
+      participants: normalizeRoomParticipants({
+        meta: row.meta ?? null,
+        fallbackCharacterId: row.character_id,
+      }),
+      meta: row.meta ?? null,
+      createdAt: row.created_at,
+    }));
 
-    const { data, error } = await supabase
-      .from("common_sessions")
-      .select("id, title, character_id, mode, layer, location, chat_mode, created_at")
-      .eq("user_id", userId)
-      .eq("app", "touhou")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("[/api/session][GET] Supabase error:", error);
-      return NextResponse.json(
-        { error: "Failed to fetch sessions" },
-        { status: 500 },
-      );
-    }
-
-    const sessions: SessionSummary[] =
-      (data as ConversationRow[] | null)?.map((row) => ({
-        id: row.id,
-        title: row.title ?? "新しい会話",
-        characterId: row.character_id,
-        mode: row.mode,
-        layer: row.layer,
-        location: row.location,
-        chatMode: (row.chat_mode ?? "partner") as ChatMode,
-        createdAt: row.created_at,
-      })) ?? [];
-
-    return NextResponse.json({ sessions });
+    return NextResponse.json({ sessions: response });
   } catch (err) {
     console.error("[/api/session][GET] Error:", err);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 }
 
-/* =========================
-   POST /api/session
-   - 新規セッション作成
-========================= */
-
 export async function POST(req: NextRequest) {
   try {
-    console.log("[/api/session][POST] cookie:", req.headers.get("cookie"));
-
-    const supabase = await supabaseServer();
-    const userId = await requireUserId();
+    const supabase = supabaseAdmin();
+    const user = await requireUser();
+    const userId = user.id;
 
     const body = (await req.json()) as CreateSessionRequest;
-    const { characterId, mode = "single", layer, location, chatMode } = body;
+    const {
+      characterId,
+      participantCharacterIds,
+      invitedHumans,
+      mode = "single",
+      layer,
+      location,
+      chatMode,
+    } = body;
 
-    if (!characterId || typeof characterId !== "string") {
-      return NextResponse.json(
-        { error: "Invalid request body" },
-        { status: 400 },
-      );
+    const aiCharacterIds = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(participantCharacterIds) ? participantCharacterIds : []),
+          ...(typeof characterId === "string" && characterId.trim() ? [characterId.trim()] : []),
+        ]
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    );
+
+    if (aiCharacterIds.length === 0) {
+      return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
     }
 
     if (mode !== "single" && mode !== "group") {
-      return NextResponse.json(
-        { error: "Invalid session mode" },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "Invalid session mode" }, { status: 400 });
     }
 
     const cm: ChatMode = chatMode ?? "partner";
     if (cm !== "partner" && cm !== "roleplay" && cm !== "coach") {
-      return NextResponse.json(
-        { error: "Invalid chat mode" },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "Invalid chat mode" }, { status: 400 });
     }
+
+    const participants = buildSessionParticipants({
+      owner: user,
+      aiCharacterIds,
+      invitedHumans,
+    });
+    const primaryCharacterId = getPrimaryAiCharacterId(participants, aiCharacterIds[0]);
+    if (!primaryCharacterId) {
+      return NextResponse.json({ error: "Failed to resolve primary character" }, { status: 400 });
+    }
+
+    const roomMode: SessionMode = aiCharacterIds.length > 1 ? "group" : mode;
+    const roomKind = participants.some((participant) => participant.kind === "human" && !participant.isSelf)
+      ? "mixed"
+      : aiCharacterIds.length > 1
+        ? "group_ai"
+        : "single";
 
     const insertPayload: Record<string, unknown> = {
       user_id: userId,
       app: "touhou",
-      title: "新しい会話",
-      character_id: characterId,
-      mode,
+      title: roomMode === "group" ? "新しいルーム" : "新しい会話",
+      character_id: primaryCharacterId,
+      mode: roomMode,
       layer: layer ?? null,
       location: location ?? null,
       chat_mode: cm,
+      meta: {
+        participants,
+        room_kind: roomKind,
+        participant_character_ids: aiCharacterIds,
+        owner_user_id: userId,
+        last_speaker_character_id: primaryCharacterId,
+      },
     };
-
-    // Normalize default title (avoid mojibake if the file encoding ever drifts).
-    insertPayload.title = "新しい会話";
 
     const { data, error } = await supabase
       .from("common_sessions")
@@ -173,16 +177,10 @@ export async function POST(req: NextRequest) {
 
     if (error || !data) {
       console.error("[/api/session][POST] Supabase error:", error);
-      return NextResponse.json(
-        { error: "Failed to create session" },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: "Failed to create session" }, { status: 500 });
     }
 
-    const response: CreateSessionResponse = {
-      sessionId: data.id,
-    };
-
+    const response: CreateSessionResponse = { sessionId: data.id };
     return NextResponse.json(response);
   } catch (err) {
     console.error("[/api/session][POST] Error:", err);

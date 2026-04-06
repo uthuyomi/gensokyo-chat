@@ -21,12 +21,16 @@ export type TalkUiMessage = {
 export function talkMessageToThreadMessageLike(
   m: TalkUiMessage,
 ): ThreadMessageLike {
+  const customMetadata = {
+    ...(m.meta ?? {}),
+    _talkSpeakerId: m.speakerId ?? null,
+  };
   return {
     id: m.id,
     role: m.role === "ai" ? "assistant" : "user",
     content: m.content,
     ...(m.attachments ? { attachments: m.attachments } : undefined),
-    ...(m.meta ? { metadata: { custom: m.meta } } : undefined),
+    metadata: { custom: customMetadata },
   };
 }
 
@@ -71,4 +75,3 @@ export class TouhouUploadAttachmentAdapter implements AttachmentAdapter {
     };
   }
 }
-

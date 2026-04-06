@@ -14,8 +14,11 @@ import math
 import os
 import random
 import time
+import base64
+import io
 import hashlib
 import threading
+import uuid
 from typing import Any, Dict, Iterable, List, Optional
 
 import openai
@@ -25,6 +28,8 @@ from persona_core.controller.persona_controller import LLMClientLike
 from persona_core.identity.identity_continuity import IdentityContinuityResult
 from persona_core.memory.memory_orchestrator import MemorySelectionResult
 from persona_core.state.global_state_machine import GlobalStateContext, PersonaGlobalState
+from persona_core.storage.supabase_rest import SupabaseConfig, SupabaseRESTClient
+from persona_core.storage.supabase_store import SupabasePersonaDB
 from persona_core.trait.trait_drift_engine import TraitState
 from persona_core.types.core_types import PersonaRequest
 from persona_core.value.value_drift_engine import ValueState
@@ -84,6 +89,10 @@ class OpenAILLMClient(LLMClientLike):
         self._embed_cache_max = max(0, min(10000, self._embed_cache_max))
         self._embed_cache: Dict[str, Dict[str, Any]] = {}  # key -> {"ts": float, "emb": list[float]}
         self._embed_cache_lock = threading.Lock()
+        self._attachment_file_cache: Dict[str, Dict[str, Any]] = {}
+        self._attachment_file_cache_lock = threading.Lock()
+        self._attachment_meta_store = self._build_attachment_meta_store()
+        self._io_audit_store = self._build_io_audit_store()
 
     # --------------------------
     # Embeddings
@@ -296,6 +305,622 @@ class OpenAILLMClient(LLMClientLike):
             "続きがあります。直前の出力の続きから、重複を避けてそのまま続きを書いてください。"
             "可能なら簡潔に、必要なら段落を区切って読みやすくしてください。"
         )
+
+    def _responses_api_enabled(self) -> bool:
+        raw = os.getenv("SIGMARIS_USE_RESPONSES_API", "1")
+        return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+    def _build_attachment_meta_store(self) -> Optional[SupabasePersonaDB]:
+        try:
+            cfg = SupabaseConfig.from_env()
+            if cfg is None:
+                return None
+            return SupabasePersonaDB(SupabaseRESTClient(cfg))
+        except Exception:
+            return None
+
+    def _build_io_audit_store(self) -> Optional[SupabasePersonaDB]:
+        return self._build_attachment_meta_store()
+
+    def _openai_file_cache_enabled(self) -> bool:
+        raw = os.getenv("SIGMARIS_OPENAI_FILE_CACHE_ENABLED", "1")
+        return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+    def _openai_file_cache_ttl_sec(self) -> int:
+        raw = os.getenv("SIGMARIS_OPENAI_FILE_CACHE_TTL_SEC", "604800")
+        try:
+            ttl = int(raw)
+        except Exception:
+            ttl = 604800
+        return max(0, ttl)
+
+    def _openai_file_cleanup_enabled(self) -> bool:
+        raw = os.getenv("SIGMARIS_OPENAI_FILE_CLEANUP_ENABLED", "1")
+        return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
+    def _response_attachment_purpose(self, item: Dict[str, Any]) -> Optional[str]:
+        t = str(item.get("type") or "").strip()
+        if t == "input_image":
+            return "vision"
+        if t == "input_file":
+            return "user_data"
+        return None
+
+    def _attachment_cache_key(self, item: Dict[str, Any], purpose: str) -> str:
+        attachment_id = str(item.get("attachment_id") or "").strip()
+        sha = str(item.get("attachment_sha256") or "").strip()
+        name = str(item.get("file_name") or item.get("filename") or "attachment").strip()
+        mime = str(item.get("mime_type") or "application/octet-stream").strip()
+        return f"{attachment_id}:{purpose}:{sha}:{name}:{mime}"
+
+    def _cached_openai_file_entry(self, item: Dict[str, Any], purpose: str) -> Optional[Dict[str, Any]]:
+        attachment_meta = item.get("attachment_meta")
+        if not isinstance(attachment_meta, dict):
+            attachment_meta = {}
+        openai_files = attachment_meta.get("openai_files")
+        if not isinstance(openai_files, dict):
+            openai_files = {}
+        entry = openai_files.get(purpose)
+        return entry if isinstance(entry, dict) else None
+
+    def _cache_entry_matches_attachment(self, item: Dict[str, Any], purpose: str, entry: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(entry, dict):
+            return False
+        file_id = str(entry.get("file_id") or "").strip()
+        if not file_id:
+            return False
+        sha = str(item.get("attachment_sha256") or "").strip()
+        cached_sha = str(entry.get("attachment_sha256") or "").strip()
+        if sha and cached_sha and sha != cached_sha:
+            return False
+        name = str(item.get("file_name") or item.get("filename") or "attachment").strip()
+        if str(entry.get("file_name") or "").strip() not in ("", name):
+            return False
+        mime = str(item.get("mime_type") or "application/octet-stream").strip()
+        if str(entry.get("mime_type") or "").strip() not in ("", mime):
+            return False
+        return str(entry.get("purpose") or "").strip() in ("", purpose)
+
+    def _cache_entry_expired(self, entry: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(entry, dict):
+            return True
+        ttl = self._openai_file_cache_ttl_sec()
+        if ttl <= 0:
+            return False
+        ts = entry.get("updated_at_unix")
+        if not isinstance(ts, (int, float)):
+            return True
+        return (time.time() - float(ts)) > float(ttl)
+
+    def _decode_native_attachment_bytes(self, item: Dict[str, Any]) -> Optional[bytes]:
+        try:
+            t = str(item.get("type") or "").strip()
+            if t == "input_file":
+                raw = item.get("file_data")
+                if isinstance(raw, str) and raw:
+                    return base64.b64decode(raw.encode("ascii"), validate=False)
+                return None
+            if t == "input_image":
+                image_url = str(item.get("image_url") or "").strip()
+                if not image_url.startswith("data:") or "," not in image_url:
+                    return None
+                _, payload = image_url.split(",", 1)
+                return base64.b64decode(payload.encode("ascii"), validate=False)
+        except Exception:
+            return None
+        return None
+
+    def _looks_like_uuid(self, value: Any) -> bool:
+        try:
+            uuid.UUID(str(value or ""))
+            return True
+        except Exception:
+            return False
+
+    def _audit_openai_file_cache_event(
+        self,
+        *,
+        audit_ctx: Optional[Dict[str, Any]],
+        action: str,
+        item: Optional[Dict[str, Any]] = None,
+        purpose: Optional[str] = None,
+        ok: bool,
+        error: Optional[str] = None,
+        response: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if self._io_audit_store is None or not isinstance(audit_ctx, dict):
+            return
+        user_id = str(audit_ctx.get("user_id") or "").strip()
+        if not self._looks_like_uuid(user_id):
+            return
+        session_id = str(audit_ctx.get("session_id") or "").strip() or None
+        trace_id = str(audit_ctx.get("trace_id") or "").strip() or None
+        item0 = item if isinstance(item, dict) else {}
+        request_payload = {
+            "action": str(action or ""),
+            "attachment_id": str(item0.get("attachment_id") or "").strip() or None,
+            "purpose": str(purpose or "").strip() or None,
+            "file_name": str(item0.get("file_name") or item0.get("filename") or "").strip() or None,
+            "mime_type": str(item0.get("mime_type") or "").strip() or None,
+            "size_bytes": int(item0.get("size_bytes")) if isinstance(item0.get("size_bytes"), int) else None,
+            "attachment_sha256": str(item0.get("attachment_sha256") or "").strip() or None,
+        }
+        try:
+            self._io_audit_store.insert_io_event(
+                user_id=user_id,
+                session_id=session_id,
+                trace_id=trace_id,
+                event_type="openai_file_cache",
+                cache_key=self._attachment_cache_key(item0, purpose or "") if item0 and purpose else None,
+                ok=bool(ok),
+                error=(str(error) if error else None),
+                request=request_payload,
+                response=response or {},
+                source_urls=[],
+                content_sha256=None,
+                meta={"component": "openai_llm_client", "cache_layer": "attachment_file"},
+            )
+        except Exception:
+            logging.getLogger(__name__).debug("failed to audit OpenAI file cache event", exc_info=True)
+
+    def _delete_openai_file_best_effort(self, file_id: Optional[str]) -> None:
+        fid = str(file_id or "").strip()
+        if not fid or not self._openai_file_cleanup_enabled():
+            return
+        try:
+            self.client.files.delete(fid)
+        except Exception:
+            logging.getLogger(__name__).debug("failed to delete cached OpenAI file", exc_info=True)
+
+    def _remove_cached_openai_file_entry(
+        self,
+        item: Dict[str, Any],
+        purpose: str,
+        *,
+        file_id: Optional[str] = None,
+        delete_remote: bool = False,
+        audit_ctx: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        cache_key = self._attachment_cache_key(item, purpose)
+        removed_entry: Optional[Dict[str, Any]] = None
+        with self._attachment_file_cache_lock:
+            hit = self._attachment_file_cache.get(cache_key)
+            if isinstance(hit, dict):
+                hit_id = str(hit.get("file_id") or "").strip()
+                if not file_id or not hit_id or hit_id == str(file_id).strip():
+                    removed_entry = dict(hit)
+                    self._attachment_file_cache.pop(cache_key, None)
+
+        attachment_meta = item.get("attachment_meta")
+        current_meta = dict(attachment_meta) if isinstance(attachment_meta, dict) else {}
+        openai_files = dict(current_meta.get("openai_files")) if isinstance(current_meta.get("openai_files"), dict) else {}
+        meta_entry = openai_files.get(purpose)
+        if isinstance(meta_entry, dict):
+            meta_file_id = str(meta_entry.get("file_id") or "").strip()
+            if not file_id or not meta_file_id or meta_file_id == str(file_id).strip():
+                if removed_entry is None:
+                    removed_entry = dict(meta_entry)
+                openai_files.pop(purpose, None)
+                current_meta["openai_files"] = openai_files
+                item["attachment_meta"] = current_meta
+                attachment_id = str(item.get("attachment_id") or "").strip()
+                if attachment_id and self._attachment_meta_store is not None:
+                    try:
+                        self._attachment_meta_store.update_attachment_meta(attachment_id=attachment_id, meta=current_meta)
+                    except Exception:
+                        logging.getLogger(__name__).warning("failed to remove attachment OpenAI file cache metadata", exc_info=True)
+
+        if delete_remote:
+            target_id = str(file_id or "") or str((removed_entry or {}).get("file_id") or "")
+            self._delete_openai_file_best_effort(target_id)
+            if target_id:
+                self._audit_openai_file_cache_event(
+                    audit_ctx=audit_ctx,
+                    action="delete",
+                    item=item,
+                    purpose=purpose,
+                    ok=True,
+                    response={"file_id": target_id, "reason": "cache_cleanup"},
+                )
+
+    def _persist_attachment_file_cache(
+        self,
+        item: Dict[str, Any],
+        entry: Dict[str, Any],
+        *,
+        audit_ctx: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        attachment_id = str(item.get("attachment_id") or "").strip()
+        if not attachment_id:
+            return
+        attachment_meta = item.get("attachment_meta")
+        current_meta = dict(attachment_meta) if isinstance(attachment_meta, dict) else {}
+        openai_files = dict(current_meta.get("openai_files")) if isinstance(current_meta.get("openai_files"), dict) else {}
+        purpose = str(entry.get("purpose") or "").strip()
+        if not purpose:
+            return
+        previous = openai_files.get(purpose) if isinstance(openai_files.get(purpose), dict) else None
+        openai_files[purpose] = entry
+        current_meta["openai_files"] = openai_files
+        item["attachment_meta"] = current_meta
+        if self._attachment_meta_store is None:
+            prev_id = str((previous or {}).get("file_id") or "").strip()
+            next_id = str(entry.get("file_id") or "").strip()
+            if prev_id and next_id and prev_id != next_id:
+                self._delete_openai_file_best_effort(prev_id)
+                self._audit_openai_file_cache_event(
+                    audit_ctx=audit_ctx,
+                    action="delete",
+                    item=item,
+                    purpose=purpose,
+                    ok=True,
+                    response={"file_id": prev_id, "reason": "replaced_before_persist"},
+                )
+            return
+        try:
+            self._attachment_meta_store.update_attachment_meta(attachment_id=attachment_id, meta=current_meta)
+            prev_id = str((previous or {}).get("file_id") or "").strip()
+            next_id = str(entry.get("file_id") or "").strip()
+            if prev_id and next_id and prev_id != next_id:
+                self._delete_openai_file_best_effort(prev_id)
+                self._audit_openai_file_cache_event(
+                    audit_ctx=audit_ctx,
+                    action="delete",
+                    item=item,
+                    purpose=purpose,
+                    ok=True,
+                    response={"file_id": prev_id, "reason": "replaced"},
+                )
+        except Exception:
+            logging.getLogger(__name__).warning("failed to persist attachment OpenAI file cache", exc_info=True)
+
+    def _upload_attachment_as_openai_file(
+        self,
+        item: Dict[str, Any],
+        purpose: str,
+        *,
+        audit_ctx: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        payload = self._decode_native_attachment_bytes(item)
+        if not payload:
+            self._audit_openai_file_cache_event(
+                audit_ctx=audit_ctx,
+                action="upload_skip",
+                item=item,
+                purpose=purpose,
+                ok=False,
+                error="attachment_payload_unavailable",
+            )
+            return None
+        filename = str(item.get("file_name") or item.get("filename") or "attachment").strip() or "attachment"
+        mime_type = str(item.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
+        try:
+            uploaded = self.client.files.create(
+                file=(filename, io.BytesIO(payload), mime_type),
+                purpose=purpose,
+            )
+        except Exception as e:
+            self._audit_openai_file_cache_event(
+                audit_ctx=audit_ctx,
+                action="upload",
+                item=item,
+                purpose=purpose,
+                ok=False,
+                error=str(e),
+            )
+            raise
+        file_id = str(getattr(uploaded, "id", "") or "").strip()
+        if not file_id:
+            return None
+        entry = {
+            "file_id": file_id,
+            "purpose": purpose,
+            "file_name": filename,
+            "mime_type": mime_type,
+            "attachment_sha256": str(item.get("attachment_sha256") or "").strip() or None,
+            "updated_at_unix": int(time.time()),
+        }
+        cache_key = self._attachment_cache_key(item, purpose)
+        with self._attachment_file_cache_lock:
+            self._attachment_file_cache[cache_key] = entry
+        self._persist_attachment_file_cache(item, entry, audit_ctx=audit_ctx)
+        self._audit_openai_file_cache_event(
+            audit_ctx=audit_ctx,
+            action="upload",
+            item=item,
+            purpose=purpose,
+            ok=True,
+            response={"file_id": file_id},
+        )
+        return file_id
+
+    def _prepare_native_attachment_for_responses(
+        self,
+        item: Dict[str, Any],
+        *,
+        force_refresh: bool,
+        audit_ctx: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if not self._openai_file_cache_enabled():
+            return dict(item)
+        purpose = self._response_attachment_purpose(item)
+        if not purpose:
+            return dict(item)
+        cache_key = self._attachment_cache_key(item, purpose)
+        cached_entry: Optional[Dict[str, Any]] = None
+        if force_refresh:
+            self._remove_cached_openai_file_entry(item, purpose, delete_remote=False, audit_ctx=audit_ctx)
+        else:
+            with self._attachment_file_cache_lock:
+                hit = self._attachment_file_cache.get(cache_key)
+            if self._cache_entry_matches_attachment(item, purpose, hit):
+                cached_entry = dict(hit or {})
+            else:
+                entry = self._cached_openai_file_entry(item, purpose)
+                if self._cache_entry_matches_attachment(item, purpose, entry):
+                    cached_entry = dict(entry or {})
+                    with self._attachment_file_cache_lock:
+                        self._attachment_file_cache[cache_key] = cached_entry
+
+            if self._cache_entry_expired(cached_entry):
+                expired_id = str((cached_entry or {}).get("file_id") or "").strip()
+                cached_entry = None
+                if expired_id:
+                    self._remove_cached_openai_file_entry(
+                        item,
+                        purpose,
+                        file_id=expired_id,
+                        delete_remote=True,
+                        audit_ctx=audit_ctx,
+                    )
+
+        prepared = dict(item)
+        if cached_entry:
+            self._audit_openai_file_cache_event(
+                audit_ctx=audit_ctx,
+                action="reuse",
+                item=item,
+                purpose=purpose,
+                ok=True,
+                response={"file_id": str(cached_entry.get("file_id") or "")},
+            )
+            if purpose == "vision":
+                prepared.pop("image_url", None)
+                prepared["file_id"] = str(cached_entry.get("file_id") or "")
+            else:
+                prepared.pop("file_data", None)
+                prepared.pop("file_url", None)
+                prepared["file_id"] = str(cached_entry.get("file_id") or "")
+            return prepared
+
+        file_id = self._upload_attachment_as_openai_file(prepared, purpose, audit_ctx=audit_ctx)
+        if not file_id:
+            return prepared
+        if purpose == "vision":
+            prepared.pop("image_url", None)
+            prepared["file_id"] = file_id
+        else:
+            prepared.pop("file_data", None)
+            prepared.pop("file_url", None)
+            prepared["file_id"] = file_id
+        return prepared
+
+    def _prepare_native_attachments_for_responses(
+        self,
+        native_attachments: Optional[List[Dict[str, Any]]],
+        *,
+        force_refresh: bool = False,
+        audit_ctx: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        prepared: List[Dict[str, Any]] = []
+        for item in native_attachments or []:
+            if not isinstance(item, dict):
+                continue
+            prepared.append(
+                self._prepare_native_attachment_for_responses(
+                    item,
+                    force_refresh=force_refresh,
+                    audit_ctx=audit_ctx,
+                )
+            )
+        return prepared
+
+    def _should_retry_responses_with_refreshed_files(self, err: Exception) -> bool:
+        s = str(err or "").lower()
+        needles = ("file_id", "file id", "no such file", "not found", "purpose", "invalid file")
+        return any(n in s for n in needles)
+
+    def _build_response_input(
+        self,
+        *,
+        user_text: str,
+        history: Optional[List[Dict[str, str]]] = None,
+        native_attachments: Optional[List[Dict[str, Any]]] = None,
+    ) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        if isinstance(history, list):
+            for m in history:
+                if not isinstance(m, dict):
+                    continue
+                role = str(m.get("role") or "").strip().lower()
+                if role not in ("user", "assistant"):
+                    continue
+                content = str(m.get("content") or "").strip()
+                if not content:
+                    continue
+                content_type = "input_text" if role == "user" else "output_text"
+                items.append({"role": role, "content": [{"type": content_type, "text": content}]})
+        content_parts: List[Dict[str, Any]] = []
+        if isinstance(native_attachments, list):
+            for item in native_attachments:
+                if not isinstance(item, dict):
+                    continue
+                t = str(item.get("type") or "").strip()
+                if t == "input_image":
+                    part: Dict[str, Any] = {
+                        "type": "input_image",
+                        "detail": str(item.get("detail") or "auto"),
+                    }
+                    if isinstance(item.get("file_id"), str) and item.get("file_id"):
+                        part["file_id"] = str(item.get("file_id") or "")
+                    elif isinstance(item.get("image_url"), str) and item.get("image_url"):
+                        part["image_url"] = str(item.get("image_url") or "")
+                    if "file_id" in part or "image_url" in part:
+                        content_parts.append(part)
+                elif t == "input_file":
+                    part: Dict[str, Any] = {"type": "input_file", "filename": str(item.get("filename") or "attachment")}
+                    if isinstance(item.get("file_id"), str) and item.get("file_id"):
+                        part["file_id"] = str(item.get("file_id"))
+                    elif isinstance(item.get("file_data"), str) and item.get("file_data"):
+                        part["file_data"] = str(item.get("file_data"))
+                    elif isinstance(item.get("file_url"), str) and item.get("file_url"):
+                        part["file_url"] = str(item.get("file_url"))
+                    content_parts.append(part)
+        content_parts.append({"type": "input_text", "text": str(user_text or "").strip()})
+        items.append({"role": "user", "content": content_parts})
+        return items
+
+    def _build_responses_tools(self, *, gen: Any) -> tuple[List[Dict[str, Any]], Any]:
+        if not isinstance(gen, dict):
+            return ([], "none")
+        web_cfg = gen.get("web_rag")
+        if web_cfg is False:
+            return ([], "none")
+
+        mode = "auto"
+        allowed_domains: List[str] = []
+        if isinstance(web_cfg, dict):
+            mode = str(web_cfg.get("mode") or "auto").strip().lower()
+            raw_domains = web_cfg.get("domains")
+            if isinstance(raw_domains, list):
+                allowed_domains = [str(x).strip() for x in raw_domains if str(x).strip()]
+            if web_cfg.get("enabled") is False or mode == "off":
+                return ([], "none")
+        elif web_cfg is not True:
+            return ([], "none")
+
+        tool: Dict[str, Any] = {"type": "web_search"}
+        if allowed_domains:
+            tool["filters"] = {"allowed_domains": allowed_domains}
+        return ([tool], "required" if mode == "required" else "auto")
+
+    def _extract_response_text(self, response: Any) -> str:
+        try:
+            output_text = getattr(response, "output_text", None)
+            if isinstance(output_text, str) and output_text.strip():
+                return output_text.strip()
+        except Exception:
+            pass
+        try:
+            output = getattr(response, "output", None)
+            if isinstance(output, list):
+                parts: List[str] = []
+                for item in output:
+                    content = getattr(item, "content", None)
+                    if not isinstance(content, list):
+                        continue
+                    for block in content:
+                        text = getattr(block, "text", None)
+                        if isinstance(text, str) and text.strip():
+                            parts.append(text.strip())
+                if parts:
+                    return "\n".join(parts).strip()
+        except Exception:
+            pass
+        return ""
+
+    def _responses_incomplete_reason(self, response: Any) -> str:
+        try:
+            details = getattr(response, "incomplete_details", None)
+            reason = getattr(details, "reason", None)
+            return str(reason or "")
+        except Exception:
+            return ""
+
+    def _complete_with_responses(
+        self,
+        *,
+        instructions: str,
+        user_text: str,
+        history: Optional[List[Dict[str, str]]] = None,
+        temperature: float,
+        max_tokens: int,
+        gen: Any = None,
+        user: str = "",
+        audit_ctx: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        source_attachments = ((gen or {}).get("_native_input_attachments") if isinstance(gen, dict) else None)
+        response_input = self._build_response_input(
+            user_text=user_text,
+            history=history,
+            native_attachments=self._prepare_native_attachments_for_responses(source_attachments, audit_ctx=audit_ctx),
+        )
+        tools, tool_choice = self._build_responses_tools(gen=gen)
+        try:
+            response = self.client.responses.create(
+                model=self.model,
+                instructions=instructions,
+                input=response_input,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+                tools=tools or None,
+                tool_choice=tool_choice,
+                user=(user or None),
+            )
+        except Exception as e:
+            if not source_attachments or not self._should_retry_responses_with_refreshed_files(e):
+                raise
+            refreshed_input = self._build_response_input(
+                user_text=user_text,
+                history=history,
+                native_attachments=self._prepare_native_attachments_for_responses(
+                    source_attachments,
+                    force_refresh=True,
+                    audit_ctx=audit_ctx,
+                ),
+            )
+            response = self.client.responses.create(
+                model=self.model,
+                instructions=instructions,
+                input=refreshed_input,
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+                tools=tools or None,
+                tool_choice=tool_choice,
+                user=(user or None),
+            )
+
+        text0 = self._extract_response_text(response)
+        if not text0:
+            raise RuntimeError("empty responses content")
+
+        if self._responses_incomplete_reason(response) != "max_output_tokens" or self._max_continuations() <= 0:
+            return text0
+
+        full: List[str] = [text0]
+        previous_response_id = str(getattr(response, "id", "") or "")
+        cont_left = self._max_continuations()
+        while cont_left > 0 and previous_response_id:
+            cont_left -= 1
+            cont_resp = self.client.responses.create(
+                model=self.model,
+                previous_response_id=previous_response_id,
+                instructions=instructions,
+                input=self._continue_user_prompt(),
+                temperature=temperature,
+                max_output_tokens=max_tokens,
+                tools=tools or None,
+                tool_choice=tool_choice,
+                user=(user or None),
+            )
+            cont_text = self._extract_response_text(cont_resp)
+            if cont_text:
+                full.append(cont_text)
+            previous_response_id = str(getattr(cont_resp, "id", "") or "")
+            if self._responses_incomplete_reason(cont_resp) != "max_output_tokens":
+                break
+
+        return "\n".join([t for t in full if t]).strip()
 
     def _create_chat_completion(
         self,
@@ -549,6 +1174,213 @@ class OpenAILLMClient(LLMClientLike):
     # generate (non-stream)
     # --------------------------
 
+    def generate_direct(
+        self,
+        *,
+        system_prompt: str,
+        user_text: str,
+        history: Optional[List[Dict[str, str]]] = None,
+        gen: Optional[Dict[str, Any]] = None,
+        user: Optional[str] = None,
+        audit_ctx: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        system_prompt_with_persona = (system_prompt or "").strip() or "You are a helpful assistant."
+        client_history = history if isinstance(history, list) else []
+        gen = gen if isinstance(gen, dict) else {}
+
+        temperature = self.temperature
+        max_tokens = self.max_tokens
+        try:
+            if "temperature" in gen:
+                temperature = float(gen.get("temperature"))
+            if "max_tokens" in gen:
+                max_tokens = int(gen.get("max_tokens"))
+        except Exception:
+            temperature = self.temperature
+            max_tokens = self.max_tokens
+        temperature = self._clamp_temperature(temperature)
+        max_tokens = self._clamp_max_tokens(max_tokens)
+        quality_enabled = self._quality_pipeline_enabled(gen)
+        quality_mode = self._quality_mode(gen)
+
+        last_err: Optional[Exception] = None
+        for attempt in range(self._max_retries):
+            try:
+                if quality_enabled:
+                    return self._generate_with_quality_pipeline(
+                        system_prompt_base=system_prompt_with_persona,
+                        system_prompt_with_persona=system_prompt_with_persona,
+                        user_text=user_text,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        quality_mode=quality_mode,
+                    )
+
+                if self._responses_api_enabled():
+                    return self._complete_with_responses(
+                        instructions=system_prompt_with_persona,
+                        user_text=user_text,
+                        history=client_history,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        gen=gen,
+                        user=str(user or "") or None,
+                        audit_ctx=audit_ctx,
+                    )
+
+                messages = self._build_messages(
+                    system_prompt=system_prompt_with_persona,
+                    user_text=user_text,
+                    history=client_history,
+                )
+                return self._complete_with_continuations(messages=messages, temperature=temperature, max_tokens=max_tokens)
+            except Exception as e:
+                last_err = e
+                if self._is_token_limit_error(e) and max_tokens > 16:
+                    max_tokens = max(16, max_tokens // 2)
+                    continue
+                if attempt >= self._max_retries - 1 or not self._is_retryable(e):
+                    break
+                self._backoff_sleep(attempt)
+
+        logging.getLogger(__name__).exception("OpenAILLMClient.generate_direct failed", exc_info=last_err)
+        if os.getenv("SIGMARIS_RAISE_LLM_ERRORS") not in (None, "", "0", "false", "False") and last_err is not None:
+            raise last_err
+        return "生成に失敗しました。"
+
+    def generate_stream_direct(
+        self,
+        *,
+        system_prompt: str,
+        user_text: str,
+        history: Optional[List[Dict[str, str]]] = None,
+        gen: Optional[Dict[str, Any]] = None,
+        user: Optional[str] = None,
+        audit_ctx: Optional[Dict[str, Any]] = None,
+    ) -> Iterable[str]:
+        system_prompt_with_persona = (system_prompt or "").strip() or "You are a helpful assistant."
+        client_history = history if isinstance(history, list) else []
+        gen = gen if isinstance(gen, dict) else {}
+
+        temperature = self.temperature
+        max_tokens = self.max_tokens
+        try:
+            if "temperature" in gen:
+                temperature = float(gen.get("temperature"))
+            if "max_tokens" in gen:
+                max_tokens = int(gen.get("max_tokens"))
+        except Exception:
+            temperature = self.temperature
+            max_tokens = self.max_tokens
+        temperature = self._clamp_temperature(temperature)
+        max_tokens = self._clamp_max_tokens(max_tokens)
+        quality_enabled = self._quality_pipeline_enabled(gen)
+
+        if quality_enabled:
+            final = self.generate_direct(
+                system_prompt=system_prompt_with_persona,
+                user_text=user_text,
+                history=client_history,
+                gen=gen,
+                user=user,
+                audit_ctx=audit_ctx,
+            )
+            for ch in self._chunk_text(final, chunk_size=220):
+                yield ch
+            return
+
+        last_err: Optional[Exception] = None
+        for attempt in range(self._max_retries):
+            try:
+                if self._responses_api_enabled():
+                    source_attachments = gen.get("_native_input_attachments") if isinstance(gen, dict) else None
+                    response_input = self._build_response_input(
+                        user_text=user_text,
+                        history=client_history,
+                        native_attachments=self._prepare_native_attachments_for_responses(
+                            source_attachments,
+                            audit_ctx=audit_ctx,
+                        ),
+                    )
+                    tools, tool_choice = self._build_responses_tools(gen=gen)
+                    try:
+                        stream = self.client.responses.create(
+                            model=self.model,
+                            instructions=system_prompt_with_persona,
+                            input=response_input,
+                            temperature=temperature,
+                            max_output_tokens=max_tokens,
+                            tools=tools or None,
+                            tool_choice=tool_choice,
+                            user=str(user or "") or None,
+                            stream=True,
+                        )
+                    except Exception as e:
+                        if not source_attachments or not self._should_retry_responses_with_refreshed_files(e):
+                            raise
+                        refreshed_input = self._build_response_input(
+                            user_text=user_text,
+                            history=client_history,
+                            native_attachments=self._prepare_native_attachments_for_responses(
+                                source_attachments,
+                                force_refresh=True,
+                                audit_ctx=audit_ctx,
+                            ),
+                        )
+                        stream = self.client.responses.create(
+                            model=self.model,
+                            instructions=system_prompt_with_persona,
+                            input=refreshed_input,
+                            temperature=temperature,
+                            max_output_tokens=max_tokens,
+                            tools=tools or None,
+                            tool_choice=tool_choice,
+                            user=str(user or "") or None,
+                            stream=True,
+                        )
+                    for event in stream:
+                        try:
+                            if getattr(event, "type", None) == "response.output_text.delta":
+                                delta = str(getattr(event, "delta", "") or "")
+                                if delta:
+                                    yield delta
+                        except Exception:
+                            continue
+                    return
+
+                messages = self._build_messages(
+                    system_prompt=system_prompt_with_persona,
+                    user_text=user_text,
+                    history=client_history,
+                )
+                stream = self._create_chat_completion(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                )
+                for chunk in stream:
+                    try:
+                        delta = getattr((chunk.choices or [None])[0].delta, "content", None)
+                    except Exception:
+                        delta = None
+                    if isinstance(delta, str) and delta:
+                        yield delta
+                return
+            except Exception as e:
+                last_err = e
+                if self._is_token_limit_error(e) and max_tokens > 16:
+                    max_tokens = max(16, max_tokens // 2)
+                    continue
+                if attempt >= self._max_retries - 1 or not self._is_retryable(e):
+                    break
+                self._backoff_sleep(attempt)
+
+        logging.getLogger(__name__).exception("OpenAILLMClient.generate_stream_direct failed", exc_info=last_err)
+        if last_err is not None:
+            raise last_err
+        raise RuntimeError("stream generation failed")
+
     def generate(
         self,
         *,
@@ -651,6 +1483,12 @@ class OpenAILLMClient(LLMClientLike):
             gen = (getattr(req, "metadata", None) or {}).get("gen") or {}
         except Exception:
             gen = {}
+        try:
+            native_attachments = (getattr(req, "metadata", None) or {}).get("_native_input_attachments")
+            if isinstance(gen, dict) and isinstance(native_attachments, list) and native_attachments:
+                gen = {**gen, "_native_input_attachments": native_attachments}
+        except Exception:
+            pass
         temperature = self.temperature
         max_tokens = self.max_tokens
         try:
@@ -679,6 +1517,22 @@ class OpenAILLMClient(LLMClientLike):
                         temperature=temperature,
                         max_tokens=max_tokens,
                         quality_mode=quality_mode,
+                    )
+
+                if self._responses_api_enabled():
+                    return self._complete_with_responses(
+                        instructions=system_prompt_with_persona,
+                        user_text=user_text,
+                        history=client_history,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        gen=gen,
+                        user=str(getattr(req, "user_id", "") or ""),
+                        audit_ctx={
+                            "user_id": str(getattr(req, "user_id", "") or ""),
+                            "session_id": str(getattr(req, "session_id", "") or ""),
+                            "trace_id": str(((getattr(req, "metadata", None) or {}).get("_trace_id")) or ""),
+                        },
                     )
 
                 messages = self._build_messages(
@@ -782,6 +1636,12 @@ class OpenAILLMClient(LLMClientLike):
             gen = (getattr(req, "metadata", None) or {}).get("gen") or {}
         except Exception:
             gen = {}
+        try:
+            native_attachments = (getattr(req, "metadata", None) or {}).get("_native_input_attachments")
+            if isinstance(gen, dict) and isinstance(native_attachments, list) and native_attachments:
+                gen = {**gen, "_native_input_attachments": native_attachments}
+        except Exception:
+            pass
         temperature = self.temperature
         max_tokens = self.max_tokens
         try:
@@ -831,6 +1691,67 @@ class OpenAILLMClient(LLMClientLike):
 
         for attempt in range(self._max_retries):
             try:
+                if self._responses_api_enabled():
+                    source_attachments = ((gen or {}).get("_native_input_attachments") if isinstance(gen, dict) else None)
+                    audit_ctx = {
+                        "user_id": str(getattr(req, "user_id", "") or ""),
+                        "session_id": str(getattr(req, "session_id", "") or ""),
+                        "trace_id": str(((getattr(req, "metadata", None) or {}).get("_trace_id")) or ""),
+                    }
+                    response_input = self._build_response_input(
+                        user_text=user_text,
+                        history=client_history,
+                        native_attachments=self._prepare_native_attachments_for_responses(
+                            source_attachments,
+                            audit_ctx=audit_ctx,
+                        ),
+                    )
+                    tools, tool_choice = self._build_responses_tools(gen=gen)
+                    try:
+                        stream = self.client.responses.create(
+                            model=self.model,
+                            instructions=system_prompt_with_persona,
+                            input=response_input,
+                            temperature=temperature,
+                            max_output_tokens=max_tokens,
+                            tools=tools or None,
+                            tool_choice=tool_choice,
+                            user=str(getattr(req, "user_id", "") or "") or None,
+                            stream=True,
+                        )
+                    except Exception as e:
+                        if not source_attachments or not self._should_retry_responses_with_refreshed_files(e):
+                            raise
+                        refreshed_input = self._build_response_input(
+                            user_text=user_text,
+                            history=client_history,
+                            native_attachments=self._prepare_native_attachments_for_responses(
+                                source_attachments,
+                                force_refresh=True,
+                                audit_ctx=audit_ctx,
+                            ),
+                        )
+                        stream = self.client.responses.create(
+                            model=self.model,
+                            instructions=system_prompt_with_persona,
+                            input=refreshed_input,
+                            temperature=temperature,
+                            max_output_tokens=max_tokens,
+                            tools=tools or None,
+                            tool_choice=tool_choice,
+                            user=str(getattr(req, "user_id", "") or "") or None,
+                            stream=True,
+                        )
+                    for event in stream:
+                        try:
+                            if getattr(event, "type", None) == "response.output_text.delta":
+                                delta = str(getattr(event, "delta", "") or "")
+                                if delta:
+                                    yield delta
+                        except Exception:
+                            continue
+                    return
+
                 base_messages = self._build_messages(
                     system_prompt=system_prompt_with_persona,
                     user_text=user_text,

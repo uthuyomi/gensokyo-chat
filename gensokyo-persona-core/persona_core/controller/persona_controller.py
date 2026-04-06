@@ -49,13 +49,8 @@ from persona_core.state.global_state_machine import (
     GlobalStateContext,
     PersonaGlobalState,
 )
-from persona_core.state.continuity_engine import ContinuityEngine
-from persona_core.telemetry.telemetry_engine import TelemetryEngine
-from persona_core.narrative.narrative_engine import NarrativeEngine
 from persona_core.guardrail.guardrail_engine import GuardrailEngine
-from persona_core.ego.ego_engine import EgoEngine
 from persona_core.ego.ego_state import EgoContinuityState
-from persona_core.integration.integration_controller import IntegrationController
 from persona_core.temporal_identity.temporal_identity_state import TemporalIdentityState
 from persona_core.phase03.intent_layers import IntentLayers, IntentVectorEMA
 from persona_core.phase03.dialogue_state_machine import STATE_IDS, DialogueState, DialogueStateMachine
@@ -89,6 +84,43 @@ def _as_float(v: Any, default: float = 0.0) -> float:
     except Exception:
         return float(default)
     return float(default)
+
+
+def _empty_telemetry() -> Dict[str, Any]:
+    return {
+        "scores": {"C": 0.0, "N": 0.0, "M": 0.0, "S": 0.0, "R": 0.0},
+        "ema": {},
+        "flags": {},
+        "reasons": {},
+    }
+
+
+def _apply_compact_observability(meta: Dict[str, Any]) -> None:
+    meta["narrative"] = {}
+    meta["continuity"] = {}
+    meta["ego"] = {}
+    meta["integrity_flags"] = []
+    meta["telemetry"] = _empty_telemetry()
+    meta["integration"] = {}
+
+
+@dataclass
+class TurnSetup:
+    uid: Optional[str]
+    meta: Dict[str, Any]
+    t0: float
+    t_marks: Dict[str, float]
+    turn_trace_id: str
+
+
+@dataclass
+class PreparedTurnState:
+    memory_result: MemorySelectionResult
+    identity_result: IdentityContinuityResult
+    value_result: ValueDriftResult
+    trait_result: TraitDriftResult
+    baseline_delta: Optional[Dict[str, float]]
+    global_state_ctx: GlobalStateContext
 
 
 # --------------------------------------------------------------
@@ -179,13 +211,8 @@ class PersonaController:
         self._value = value_engine
         self._trait = trait_engine
         self._fsm = global_fsm
-        self._telemetry = TelemetryEngine()
-        self._continuity = ContinuityEngine()
-        self._narrative = NarrativeEngine()
         self._guardrail = GuardrailEngine()
-        self._ego = EgoEngine()
         self._ego_state: Optional[EgoContinuityState] = initial_ego_state
-        self._integration = IntegrationController()
         self._temporal_identity_state: Optional[TemporalIdentityState] = initial_temporal_identity_state
         self._freeze_updates: bool = False
 
@@ -388,6 +415,333 @@ class PersonaController:
         cur2["self_assess"] = assessed
         cur2["params_after"] = st.params.as_dict()
         meta["naturalness"] = cur2
+
+    def _should_apply_naturalness(self, *, req: PersonaRequest) -> bool:
+        md = getattr(req, "metadata", None)
+        md = md if isinstance(md, dict) else {}
+        chat_mode = str(md.get("chat_mode") or "").strip().lower()
+        if chat_mode == "roleplay":
+            return True
+        user_text = str(getattr(req, "message", "") or "")
+        if detect_user_wants_choices(user_text):
+            return True
+        return False
+
+    def _run_phase03(
+        self,
+        *,
+        req: PersonaRequest,
+        meta: Dict[str, Any],
+        safety_flag: Optional[str],
+    ) -> None:
+        session_id = getattr(req, "session_id", None) or ""
+        if not isinstance(session_id, str):
+            session_id = str(session_id)
+
+        if session_id and session_id not in self._intent_ema_by_session:
+            if len(self._intent_ema_by_session) >= self._phase03_session_cap:
+                try:
+                    k0 = next(iter(self._intent_ema_by_session.keys()))
+                    self._intent_ema_by_session.pop(k0, None)
+                    self._dialogue_state_by_session.pop(k0, None)
+                except Exception:
+                    self._intent_ema_by_session.clear()
+                    self._dialogue_state_by_session.clear()
+
+        md = (getattr(req, "metadata", None) or {}) if isinstance(getattr(req, "metadata", None), dict) else {}
+        iv = self._intent_layers.compute(message=getattr(req, "message", "") or "", metadata=md)
+
+        ema = self._intent_ema_by_session.get(session_id)
+        if ema is None:
+            ema = IntentVectorEMA(alpha=float(os.getenv("SIGMARIS_PHASE03_INTENT_EMA_ALPHA", "0.18") or "0.18"))
+            self._intent_ema_by_session[session_id] = ema
+        intent_ema = ema.update(iv.raw)
+
+        safety_risk_score = md.get("_safety_risk_score")
+        safety_categories = md.get("_safety_categories") if isinstance(md.get("_safety_categories"), dict) else None
+        so = self._safety_override.decide(
+            safety_flag=safety_flag,
+            safety_risk_score=(float(safety_risk_score) if safety_risk_score is not None else None),
+            intent_safety_risk=float(intent_ema.get("safety_risk", 0.0)),
+            categories=safety_categories,
+        )
+        safety_forced = bool(so.active and so.level in ("hard", "terminate"))
+        prev_ds = self._dialogue_state_by_session.get(session_id)
+        ds, transition = self._dsm.decide(
+            prev=prev_ds,
+            intent_ema=intent_ema,
+            intent_confidence=float(iv.confidence),
+            safety_forced=safety_forced,
+            safety_active=bool(so.active),
+            subjectivity_mode=None,
+            transition_reasons=[],
+        )
+        try:
+            forced = md.get("_phase03_forced_dialogue_state")
+            if isinstance(forced, str) and forced in STATE_IDS and forced != ds.current_state:
+                t_force = time.time()
+                ds = DialogueState(
+                    current_state=forced,
+                    prev_state=ds.current_state,
+                    entered_at=t_force,
+                    confidence=1.0,
+                    stability_score=1.0,
+                    last_transition_reason="auto_recovery",
+                )
+                transition = {
+                    "from": transition.get("from") or (prev_ds.current_state if prev_ds else None),
+                    "to": forced,
+                    "trigger": "auto_recovery",
+                    "hysteresis_applied": False,
+                    "dwell_ms": 0,
+                    "reasons": list(transition.get("reasons") or []) + ["auto_recovery_forced"],
+                    "subjectivity_mode": None,
+                }
+        except Exception:
+            pass
+        if session_id:
+            self._dialogue_state_by_session[session_id] = ds
+
+        gen = md.get("gen") if isinstance(md.get("gen"), dict) else {}
+        if not isinstance(gen, dict):
+            gen = {}
+        if "temperature" not in gen or not isinstance(gen.get("temperature"), (int, float)):
+            temp_map = {
+                "S1_CASUAL": 0.85,
+                "S2_TASK": 0.45,
+                "S3_EMOTIONAL": 0.60,
+                "S4_META": 0.50,
+                "S5_CREATIVE": 0.95,
+                "S6_SAFETY": 0.25,
+                "S0_NEUTRAL": 0.70,
+            }
+            gen["temperature"] = float(temp_map.get(ds.current_state, 0.70))
+        if "max_tokens" not in gen or not isinstance(gen.get("max_tokens"), (int, float)):
+            max_map = {
+                "S1_CASUAL": 700,
+                "S2_TASK": 1600,
+                "S3_EMOTIONAL": 1200,
+                "S4_META": 1400,
+                "S5_CREATIVE": 1800,
+                "S6_SAFETY": 700,
+                "S0_NEUTRAL": 1400,
+            }
+            gen["max_tokens"] = int(max_map.get(ds.current_state, 1400))
+
+        if isinstance(getattr(req, "metadata", None), dict):
+            req.metadata["gen"] = gen
+            req.metadata["_phase03_dialogue_state"] = ds.current_state
+
+        meta["phase03"] = {
+            "timing_ms": {},
+            "intent": {
+                "category": {
+                    "scores": iv.category_scores,
+                    "primary": iv.primary,
+                    "secondary": iv.secondary,
+                },
+                "vector": {"raw": iv.raw, "ema": intent_ema},
+                "confidence": float(iv.confidence),
+            },
+            "routing": {
+                "strategy": "hybrid",
+                "target_state": ds.current_state,
+                "transition_confidence": float(ds.confidence),
+                "reasons": transition.get("reasons", []),
+            },
+            "dialogue": {
+                "state": {
+                    "current": ds.current_state,
+                    "previous": ds.prev_state,
+                    "stability": float(getattr(ds, "stability_score", 0.0) or 0.0),
+                },
+                "transition": transition,
+            },
+            "safety": so.to_dict(),
+            "auto_recovery": {},
+        }
+
+    def _should_run_guardrail(self, *, req: PersonaRequest) -> bool:
+        md = getattr(req, "metadata", None)
+        md = md if isinstance(md, dict) else {}
+        if str(md.get("chat_mode") or "").strip().lower() == "roleplay":
+            return True
+        if str(md.get("_safety_flag") or "").strip():
+            return True
+        return False
+
+    def _begin_turn(
+        self,
+        *,
+        req: PersonaRequest,
+        user_id: Optional[str],
+        safety_flag: Optional[str],
+        overload_score: Optional[float],
+        reward_signal: float,
+        stream: bool = False,
+    ) -> tuple[TurnSetup, Any]:
+        log = get_logger(__name__)
+        trace_id: Optional[str]
+        try:
+            trace_id = (getattr(req, "metadata", None) or {}).get("_trace_id")
+        except Exception:
+            trace_id = None
+
+        def _trace(event: str, fields: Optional[Dict[str, Any]] = None) -> None:
+            if not trace_id:
+                return
+            trace_event(
+                log,
+                trace_id=str(trace_id),
+                event=f"persona_controller.{event}",
+                fields=fields,
+            )
+
+        uid: Optional[str] = (
+            user_id
+            or self._config.default_user_id
+            or getattr(req, "user_id", None)
+        )
+
+        meta: Dict[str, Any] = {}
+        turn_trace_id = str(trace_id or uuid.uuid4())
+        meta["trace_id"] = turn_trace_id
+        try:
+            if isinstance(getattr(req, "metadata", None), dict):
+                req.metadata["_trace_id"] = turn_trace_id
+                req.metadata["_freeze_updates"] = bool(self._freeze_updates)
+        except Exception:
+            pass
+
+        t0 = time.perf_counter()
+        t_marks: Dict[str, float] = {"start": t0}
+        fields = {
+            "user_id": uid,
+            "session_id": getattr(req, "session_id", None),
+            "message_len": len(getattr(req, "message", "") or ""),
+            "message_preview": preview_text(getattr(req, "message", "")) if TRACE_INCLUDE_TEXT else "",
+            "safety_flag": safety_flag,
+            "overload_score": overload_score,
+            "reward_signal": reward_signal,
+        }
+        if stream:
+            fields["stream"] = True
+        _trace("start", fields)
+        return TurnSetup(uid=uid, meta=meta, t0=t0, t_marks=t_marks, turn_trace_id=turn_trace_id), _trace
+
+    def _prepare_turn_state(
+        self,
+        *,
+        req: PersonaRequest,
+        uid: Optional[str],
+        safety_flag: Optional[str],
+        overload_score: Optional[float],
+        reward_signal: float,
+        affect_signal: Optional[Dict[str, float]],
+        meta: Dict[str, Any],
+        t_marks: Dict[str, float],
+        drift_db: Any,
+        _trace: Any,
+    ) -> PreparedTurnState:
+        memory_result = self._select_memory(req=req, user_id=uid)
+        t_marks["memory"] = time.perf_counter()
+        meta["memory"] = {
+            "pointer_count": len(memory_result.pointers),
+            "has_merged_summary": memory_result.merged_summary is not None,
+            "raw": memory_result.raw,
+        }
+        _trace(
+            "memory_selected",
+            {
+                "pointer_count": len(memory_result.pointers),
+                "has_merged_summary": memory_result.merged_summary is not None,
+            },
+        )
+
+        identity_result = self._identity.build_identity_context(req=req, memory=memory_result)
+        t_marks["identity"] = time.perf_counter()
+        _trace(
+            "identity_built",
+            {
+                "topic_label": (identity_result.identity_context or {}).get("topic_label"),
+                "has_past_context": (identity_result.identity_context or {}).get("has_past_context"),
+            },
+        )
+
+        try:
+            if isinstance(getattr(req, "metadata", None), dict) and self._temporal_identity_state is not None:
+                req.metadata["_tid_inertia"] = float(getattr(self._temporal_identity_state, "inertia", 0.0) or 0.0)
+                req.metadata["_tid_stability_budget"] = float(
+                    getattr(self._temporal_identity_state, "stability_budget", 1.0) or 1.0
+                )
+                mid = getattr(self._temporal_identity_state, "middle_anchor", None) or {}
+                if isinstance(mid, dict) and isinstance(mid.get("value"), dict):
+                    req.metadata["_value_anchor"] = mid.get("value") or {}
+        except Exception:
+            pass
+
+        value_result = self._value.apply(
+            current=self._value_state,
+            req=req,
+            memory=memory_result,
+            identity=identity_result,
+            reward_signal=reward_signal,
+            safety_flag=safety_flag,
+            db=drift_db,
+            user_id=uid,
+        )
+        self._value_state = value_result.new_state
+        _trace("value_drift", {"delta": getattr(value_result, "delta", None)})
+
+        trait_result = self._trait.apply(
+            current=self._trait_state,
+            baseline=self._trait_baseline,
+            req=req,
+            memory=memory_result,
+            identity=identity_result,
+            value_state=self._value_state,
+            affect_signal=affect_signal,
+            db=drift_db,
+            user_id=uid,
+        )
+        self._trait_state = trait_result.new_state
+        _trace("trait_drift", {"delta": getattr(trait_result, "delta", None)})
+
+        baseline_delta = self._update_trait_baseline(
+            reward_signal=reward_signal,
+            safety_flag=safety_flag,
+            overload_score=overload_score,
+        )
+
+        global_state_ctx = self._fsm.decide(
+            req=req,
+            memory=memory_result,
+            identity=identity_result,
+            value_state=self._value_state,
+            trait_state=self._trait_state,
+            safety_flag=safety_flag,
+            overload_score=overload_score,
+            prev_state=self._prev_global_state,
+        )
+        self._prev_global_state = global_state_ctx.state
+        t_marks["global_fsm"] = time.perf_counter()
+        _trace(
+            "global_state",
+            {
+                "state": getattr(global_state_ctx.state, "name", getattr(global_state_ctx, "state", None)),
+                "prev_state": getattr(getattr(global_state_ctx, "prev_state", None), "name", None),
+                "reasons": getattr(global_state_ctx, "reasons", None),
+            },
+        )
+
+        return PreparedTurnState(
+            memory_result=memory_result,
+            identity_result=identity_result,
+            value_result=value_result,
+            trait_result=trait_result,
+            baseline_delta=baseline_delta,
+            global_state_ctx=global_state_ctx,
+        )
 
     # ==========================================================
     # Main turn
@@ -713,587 +1067,75 @@ class PersonaController:
         # Trace（任意）
         # - server_persona_os.py が PersonaRequest.metadata に `_trace_id` を埋めてくれた場合のみ出力
         # ------------------------------------------------------
-        log = get_logger(__name__)
-        trace_id: Optional[str]
-        try:
-            trace_id = (getattr(req, "metadata", None) or {}).get("_trace_id")
-        except Exception:
-            trace_id = None
-
-        def _trace(event: str, fields: Optional[Dict[str, Any]] = None) -> None:
-            if not trace_id:
-                return
-            trace_event(
-                log,
-                trace_id=str(trace_id),
-                event=f"persona_controller.{event}",
-                fields=fields,
-            )
-
-        # user_id の最終確定（None 落ち防止）
-        uid: Optional[str] = (
-            user_id
-            or self._config.default_user_id
-            or getattr(req, "user_id", None)
-        )
-
-        meta: Dict[str, Any] = {}
-        turn_trace_id = str(trace_id or uuid.uuid4())
-        meta["trace_id"] = turn_trace_id
-        try:
-            if isinstance(getattr(req, "metadata", None), dict):
-                req.metadata["_trace_id"] = turn_trace_id
-        except Exception:
-            pass
-        t0 = time.perf_counter()
-        t_marks: Dict[str, float] = {"start": t0}
-
-        # Carry last safe-mode freeze into this turn (Part06 emergency modes)
-        try:
-            if isinstance(getattr(req, "metadata", None), dict):
-                req.metadata["_freeze_updates"] = bool(self._freeze_updates)
-        except Exception:
-            pass
-
-        # Carry last safe-mode freeze into this turn (Part06 emergency modes)
-        try:
-            if isinstance(getattr(req, "metadata", None), dict):
-                req.metadata["_freeze_updates"] = bool(self._freeze_updates)
-        except Exception:
-            pass
-
-        _trace(
-            "start",
-            {
-                "user_id": uid,
-                "session_id": getattr(req, "session_id", None),
-                "message_len": len(getattr(req, "message", "") or ""),
-                "message_preview": preview_text(getattr(req, "message", "")) if TRACE_INCLUDE_TEXT else "",
-                "safety_flag": safety_flag,
-                "overload_score": overload_score,
-                "reward_signal": reward_signal,
-            },
-        )
-
-        # ---- 1) Memory selection ----
-        memory_result = self._select_memory(req=req, user_id=uid)
-
-        meta["memory"] = {
-            "pointer_count": len(memory_result.pointers),
-            "has_merged_summary": memory_result.merged_summary is not None,
-            "raw": memory_result.raw,  # ★ 透過
-        }
-
-        _trace(
-            "memory_selected",
-            {
-                "pointer_count": len(memory_result.pointers),
-                "has_merged_summary": memory_result.merged_summary is not None,
-            },
-        )
-
-        # ---- 2) Identity continuity ----
-        identity_result = self._identity.build_identity_context(
+        turn, _trace = self._begin_turn(
             req=req,
-            memory=memory_result,
-        )
-        t_marks["identity"] = time.perf_counter()
-
-        _trace(
-            "identity_built",
-            {
-                "topic_label": (identity_result.identity_context or {}).get("topic_label"),
-                "has_past_context": (identity_result.identity_context or {}).get("has_past_context"),
-            },
-        )
-
-        # ---- 2.5) Phase02: provide TemporalIdentity signals to drift engines (optional) ----
-        try:
-            if isinstance(getattr(req, "metadata", None), dict) and self._temporal_identity_state is not None:
-                req.metadata["_tid_inertia"] = float(getattr(self._temporal_identity_state, "inertia", 0.0) or 0.0)
-                req.metadata["_tid_stability_budget"] = float(
-                    getattr(self._temporal_identity_state, "stability_budget", 1.0) or 1.0
-                )
-                mid = getattr(self._temporal_identity_state, "middle_anchor", None) or {}
-                if isinstance(mid, dict) and isinstance(mid.get("value"), dict):
-                    req.metadata["_value_anchor"] = mid.get("value") or {}
-        except Exception:
-            pass
-
-        # ---- 3) Value drift ----
-        value_result = self._value.apply(
-            current=self._value_state,
-            req=req,
-            memory=memory_result,
-            identity=identity_result,
-            reward_signal=reward_signal,
+            user_id=user_id,
             safety_flag=safety_flag,
-            db=self._db,
-            user_id=uid,
+            overload_score=overload_score,
+            reward_signal=reward_signal,
+            stream=False,
         )
-        self._value_state = value_result.new_state
+        uid = turn.uid
+        meta = turn.meta
+        t0 = turn.t0
+        t_marks = turn.t_marks
 
-        _trace("value_drift", {"delta": getattr(value_result, "delta", None)})
-
-        # ---- 4) Trait drift ----
-        trait_result = self._trait.apply(
-            current=self._trait_state,
-            baseline=self._trait_baseline,
+        prepared = self._prepare_turn_state(
             req=req,
-            memory=memory_result,
-            identity=identity_result,
-            value_state=self._value_state,
+            uid=uid,
+            safety_flag=safety_flag,
+            overload_score=overload_score,
+            reward_signal=reward_signal,
             affect_signal=affect_signal,
-            db=self._db,
-            user_id=uid,
+            meta=meta,
+            t_marks=t_marks,
+            drift_db=self._db,
+            _trace=_trace,
         )
-        self._trait_state = trait_result.new_state
+        memory_result = prepared.memory_result
+        identity_result = prepared.identity_result
+        value_result = prepared.value_result
+        trait_result = prepared.trait_result
+        baseline_delta = prepared.baseline_delta
+        global_state_ctx = prepared.global_state_ctx
 
-        _trace("trait_drift", {"delta": getattr(trait_result, "delta", None)})
-
-        # ---- 4.5) Trait baseline update（slow learning） ----
-        baseline_delta = self._update_trait_baseline(
-            reward_signal=reward_signal,
-            safety_flag=safety_flag,
-            overload_score=overload_score,
-        )
-
-        # ---- 5) Global FSM ----
-        global_state_ctx = self._fsm.decide(
-            req=req,
-            memory=memory_result,
-            identity=identity_result,
-            value_state=self._value_state,
-            trait_state=self._trait_state,
-            safety_flag=safety_flag,
-            overload_score=overload_score,
-            prev_state=self._prev_global_state,
-        )
-        self._prev_global_state = global_state_ctx.state
-        t_marks["global_fsm"] = time.perf_counter()
-
-        _trace(
-            "global_state",
-            {
-                "state": global_state_ctx.state.name,
-                "prev_state": global_state_ctx.prev_state.name if global_state_ctx.prev_state else None,
-                "reasons": global_state_ctx.reasons,
-            },
-        )
-
-        # ---- 5.25) Narrative / contradiction (Phase02 MD-03 health snapshot) ----
-        try:
-            meta["narrative"] = self._narrative.build(
-                identity=identity_result,
-                memory=memory_result,
-                global_state=global_state_ctx,
-                safety_flag=safety_flag,
-            ).to_dict()
-        except Exception:
-            meta["narrative"] = {}
-
-        # ---- 5.3) Continuity (E-layer signal; Phase02 used by M/S) ----
-        try:
-            continuity = self._continuity.compute(
-                identity=identity_result,
-                memory=memory_result,
-                global_state=global_state_ctx,
-                telemetry_ema=None,
-                overload_score=overload_score,
-                safety_flag=safety_flag,
-            )
-            meta["continuity"] = continuity.to_dict()
-        except Exception:
-            meta["continuity"] = {}
-
-        # ---- 5.4) Ego continuity (self-model snapshot; used by S) ----
-        try:
-            ego_update = self._ego.update(
-                prev=self._ego_state,
-                user_id=str(uid or ""),
-                session_id=getattr(req, "session_id", None),
-                identity=identity_result,
-                memory=memory_result,
-                value_state=self._value_state,
-                trait_state=self._trait_state,
-                global_state=global_state_ctx,
-                telemetry=None,
-                continuity=meta.get("continuity"),
-                narrative=meta.get("narrative"),
-                overload_score=overload_score,
-                drift_mag=None,
-            )
-            self._ego_state = ego_update.state
-            meta["ego"] = ego_update.summary
-            meta["integrity_flags"] = ego_update.integrity_flags
-
-            if self._db is not None and hasattr(self._db, "store_ego_snapshot"):
-                try:
-                    self._db.store_ego_snapshot(
-                        user_id=uid,
-                        session_id=getattr(req, "session_id", None),
-                        ego_id=ego_update.state.ego_id,
-                        version=int(getattr(ego_update.state, "version", 1) or 1),
-                        state=ego_update.state.to_dict(),
-                        meta={"trace_id": (getattr(req, "metadata", None) or {}).get("_trace_id")},
-                    )
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        # ---- 5.5) Telemetry (Phase02 C/N/M/S/R) ----
+        # ---- 5.25-5.6) Compact observability ----
         telemetry = None
-        try:
-            safety_risk = None
-            if isinstance(getattr(req, "metadata", None), dict):
-                safety_risk = req.metadata.get("_safety_risk_score")
-            telemetry = self._telemetry.compute(
-                identity=identity_result,
-                memory=memory_result,
-                value_state=self._value_state,
-                trait_state=self._trait_state,
-                global_state=global_state_ctx,
-                safety_flag=safety_flag,
-                overload_score=overload_score,
-                narrative=meta.get("narrative"),
-                continuity=meta.get("continuity"),
-                ego_summary=meta.get("ego"),
-                value_delta=getattr(value_result, "delta", None),
-                trait_delta=getattr(trait_result, "delta", None),
-                safety_risk_score=(float(safety_risk) if safety_risk is not None else None),
-            )
-            meta["telemetry"] = telemetry.to_dict()
-
-            if self._db is not None and hasattr(self._db, "store_telemetry_snapshot"):
-                try:
-                    self._db.store_telemetry_snapshot(
-                        user_id=uid,
-                        session_id=getattr(req, "session_id", None),
-                        scores=telemetry.scores,
-                        ema=telemetry.ema,
-                        flags=telemetry.flags,
-                        reasons=telemetry.reasons,
-                        meta={"trace_id": (getattr(req, "metadata", None) or {}).get("_trace_id")},
-                    )
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        _apply_compact_observability(meta)
         t_marks["telemetry"] = time.perf_counter()
 
-        # ---- 5.6) Integration layer (Phase02 MD-07) ----
         try:
-            drift_mag = 0.0
-            if telemetry is not None:
-                try:
-                    drift_mag = float(getattr(telemetry, "reasons", {}).get("drift_mag") or 0.0)  # type: ignore
-                except Exception:
-                    drift_mag = 0.0
-            open_contradictions = int((meta.get("ego") or {}).get("open_contradictions", 0) or 0)
-            contradiction_limit = int(os.getenv("SIGMARIS_CONTRADICTION_OPEN_LIMIT", "6") or "6")
-            contradiction_pressure = min(1.0, float(open_contradictions) / float(max(1, contradiction_limit)))
-
-            integration, new_tid_state, _phase_event = self._integration.process(
-                prev_temporal_identity=self._temporal_identity_state,
-                scores=(getattr(telemetry, "scores", None) or {}) if telemetry is not None else {},
-                continuity=meta.get("continuity") or {},
-                narrative=meta.get("narrative") or {},
-                value_meta=(self._value_state.to_dict() if hasattr(self._value_state, "to_dict") else {}),
-                self_meta=meta.get("ego") or {},
-                drift_magnitude=float(drift_mag),
-                contradiction_pressure=float(contradiction_pressure),
-                external_overwrite_suspected=False,
-                trigger_reconstruction=bool((meta.get("narrative") or {}).get("collapse_suspected", False)),
-                operator_subjectivity_mode=(
-                    (getattr(req, "metadata", None) or {}).get("_operator_subjectivity_mode")
-                    if isinstance(getattr(req, "metadata", None), dict)
-                    else None
-                ),
-                trace_id=(getattr(req, "metadata", None) or {}).get("_trace_id"),
-                value_state=self._value_state,
-                trait_state=self._trait_state,
-                ego_state=self._ego_state,
-            )
-            self._temporal_identity_state = new_tid_state
-            meta["integration"] = integration.to_dict()
-
-            # Phase02 Failure -> Phase03 Auto Recovery (best-effort)
-            try:
-                sid = getattr(req, "session_id", None)
-                session_id_str = str(sid) if sid is not None else ""
-                auto_recovery = self._decide_auto_recovery(session_id=session_id_str, failure=(integration.failure or {}))
-
-                # Attach to meta (non-null) + local event list for observability
-                try:
-                    if isinstance(meta.get("integration"), dict):
-                        meta["integration"]["auto_recovery"] = auto_recovery
-                        if isinstance(meta["integration"].get("events"), list) and bool(auto_recovery.get("active")):
-                            meta["integration"]["events"].append(
-                                {"event_type": "AUTO_RECOVERY", "at": time.time(), "payload": auto_recovery}
-                            )
-                except Exception:
-                    pass
-
-                # Append to integration event bus so it can be persisted by store_integration_events(...)
-                try:
-                    if bool(auto_recovery.get("active")):
-                        if integration.events is None:
-                            integration.events = []
-                        if isinstance(integration.events, list):
-                            integration.events.append(
-                                {"event_type": "AUTO_RECOVERY", "at": time.time(), "payload": auto_recovery}
-                            )
-                except Exception:
-                    pass
-
-                # Feed control flags into request metadata (used by Phase03 + LLM call)
-                if isinstance(getattr(req, "metadata", None), dict):
-                    req.metadata["_phase03_forced_dialogue_state"] = str(auto_recovery.get("forced_dialogue_state") or "")
-                    req.metadata["_phase03_stop_memory_injection"] = bool(auto_recovery.get("stop_memory_injection") or False)
-            except Exception:
-                pass
-
-            # Carry integration freeze into this turn for drift engines and next-turn propagation.
-            if isinstance(getattr(req, "metadata", None), dict):
-                req.metadata["_freeze_updates"] = bool(req.metadata.get("_freeze_updates") or integration.freeze_updates)
-            self._freeze_updates = bool(self._freeze_updates or integration.freeze_updates)
-
-            # Optional persistence hooks (best-effort)
-            if self._db is not None:
-                trace_id = (getattr(req, "metadata", None) or {}).get("_trace_id")
-                session_id = getattr(req, "session_id", None)
-
-                if hasattr(self._db, "store_temporal_identity_snapshot"):
-                    try:
-                        self._db.store_temporal_identity_snapshot(
-                            user_id=uid,
-                            session_id=session_id,
-                            trace_id=trace_id,
-                            ego_id=str(new_tid_state.ego_id),
-                            state=new_tid_state.to_dict(),
-                            telemetry=(integration.temporal_identity or {}),
-                        )
-                    except Exception:
-                        pass
-
-                if hasattr(self._db, "store_subjectivity_snapshot"):
-                    try:
-                        self._db.store_subjectivity_snapshot(
-                            user_id=uid,
-                            session_id=session_id,
-                            trace_id=trace_id,
-                            subjectivity=(integration.subjectivity or {}),
-                        )
-                    except Exception:
-                        pass
-
-                if hasattr(self._db, "store_failure_snapshot"):
-                    try:
-                        self._db.store_failure_snapshot(
-                            user_id=uid,
-                            session_id=session_id,
-                            trace_id=trace_id,
-                            failure=(integration.failure or {}),
-                        )
-                    except Exception:
-                        pass
-
-                if hasattr(self._db, "store_identity_snapshot"):
-                    try:
-                        self._db.store_identity_snapshot(
-                            user_id=uid,
-                            session_id=session_id,
-                            trace_id=trace_id,
-                            snapshot=(integration.identity_snapshot or {}),
-                        )
-                    except Exception:
-                        pass
-
-                if hasattr(self._db, "store_integration_events"):
-                    try:
-                        self._db.store_integration_events(
-                            user_id=uid,
-                            session_id=session_id,
-                            trace_id=trace_id,
-                            events=(integration.events or []),
-                        )
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        # ---- 5.65) Phase03: Intent + DSM + Safety Override + Observability ----
-        try:
-            session_id = getattr(req, "session_id", None) or ""
-            if not isinstance(session_id, str):
-                session_id = str(session_id)
-
-            # Cap per-session state (best-effort eviction)
-            if session_id and session_id not in self._intent_ema_by_session:
-                if len(self._intent_ema_by_session) >= self._phase03_session_cap:
-                    try:
-                        k0 = next(iter(self._intent_ema_by_session.keys()))
-                        self._intent_ema_by_session.pop(k0, None)
-                        self._dialogue_state_by_session.pop(k0, None)
-                    except Exception:
-                        self._intent_ema_by_session.clear()
-                        self._dialogue_state_by_session.clear()
-
-            md = (getattr(req, "metadata", None) or {}) if isinstance(getattr(req, "metadata", None), dict) else {}
-            iv = self._intent_layers.compute(message=getattr(req, "message", "") or "", metadata=md)
-
-            ema = self._intent_ema_by_session.get(session_id)
-            if ema is None:
-                ema = IntentVectorEMA(alpha=float(os.getenv("SIGMARIS_PHASE03_INTENT_EMA_ALPHA", "0.18") or "0.18"))
-                self._intent_ema_by_session[session_id] = ema
-            intent_ema = ema.update(iv.raw)
-
-            safety_risk_score = md.get("_safety_risk_score")
-            safety_categories = md.get("_safety_categories") if isinstance(md.get("_safety_categories"), dict) else None
-
-            so = self._safety_override.decide(
-                safety_flag=safety_flag,
-                safety_risk_score=(float(safety_risk_score) if safety_risk_score is not None else None),
-                intent_safety_risk=float(intent_ema.get("safety_risk", 0.0)),
-                categories=safety_categories,
-            )
-            safety_forced = bool(so.active and so.level in ("hard", "terminate"))
-
-            subj_mode = None
-            try:
-                subj_mode = (meta.get("integration") or {}).get("subjectivity", {}).get("mode")
-            except Exception:
-                subj_mode = None
-
-            prev_ds = self._dialogue_state_by_session.get(session_id)
-            ds, transition = self._dsm.decide(
-                prev=prev_ds,
-                intent_ema=intent_ema,
-                intent_confidence=float(iv.confidence),
-                safety_forced=safety_forced,
-                safety_active=bool(so.active),
-                subjectivity_mode=(str(subj_mode) if subj_mode is not None else None),
-                transition_reasons=[],
-            )
-
-            # Auto recovery may force dialogue state regardless of intent/DSM hysteresis.
-            try:
-                forced = md.get("_phase03_forced_dialogue_state")
-                if isinstance(forced, str) and forced in STATE_IDS and forced != ds.current_state:
-                    t_force = time.time()
-                    ds = DialogueState(
-                        current_state=forced,
-                        prev_state=ds.current_state,
-                        entered_at=t_force,
-                        confidence=1.0,
-                        stability_score=1.0,
-                        last_transition_reason="auto_recovery",
-                    )
-                    transition = {
-                        "from": transition.get("from") or (prev_ds.current_state if prev_ds else None),
-                        "to": forced,
-                        "trigger": "auto_recovery",
-                        "hysteresis_applied": False,
-                        "dwell_ms": 0,
-                        "reasons": list(transition.get("reasons") or []) + ["auto_recovery_forced"],
-                        "subjectivity_mode": subj_mode,
-                    }
-            except Exception:
-                pass
-            if session_id:
-                self._dialogue_state_by_session[session_id] = ds
-
-            # Response policy (minimal): set generation defaults per dialogue state (unless client already set)
-            gen = md.get("gen") if isinstance(md.get("gen"), dict) else {}
-            if not isinstance(gen, dict):
-                gen = {}
-            if "temperature" not in gen or not isinstance(gen.get("temperature"), (int, float)):
-                temp_map = {
-                    "S1_CASUAL": 0.85,
-                    "S2_TASK": 0.45,
-                    "S3_EMOTIONAL": 0.60,
-                    "S4_META": 0.50,
-                    "S5_CREATIVE": 0.95,
-                    "S6_SAFETY": 0.25,
-                    "S0_NEUTRAL": 0.70,
-                }
-                gen["temperature"] = float(temp_map.get(ds.current_state, 0.70))
-            if "max_tokens" not in gen or not isinstance(gen.get("max_tokens"), (int, float)):
-                max_map = {
-                    "S1_CASUAL": 700,
-                    "S2_TASK": 1600,
-                    "S3_EMOTIONAL": 1200,
-                    "S4_META": 1400,
-                    "S5_CREATIVE": 1800,
-                    "S6_SAFETY": 700,
-                    "S0_NEUTRAL": 1400,
-                }
-                gen["max_tokens"] = int(max_map.get(ds.current_state, 1400))
-
-            if isinstance(getattr(req, "metadata", None), dict):
-                req.metadata["gen"] = gen
-                req.metadata["_phase03_dialogue_state"] = ds.current_state
-
-            meta["phase03"] = {
-                "timing_ms": {},  # filled at end
-                "intent": {
-                    "category": {
-                        "scores": iv.category_scores,
-                        "primary": iv.primary,
-                        "secondary": iv.secondary,
-                    },
-                    "vector": {"raw": iv.raw, "ema": intent_ema},
-                    "confidence": float(iv.confidence),
-                },
-                "routing": {
-                    "strategy": "hybrid",
-                    "target_state": ds.current_state,
-                    "transition_confidence": float(ds.confidence),
-                    "reasons": transition.get("reasons", []),
-                },
-                "dialogue": {
-                    "state": {
-                        "current": ds.current_state,
-                        "previous": ds.prev_state,
-                        "stability": float(getattr(ds, "stability_score", 0.0) or 0.0),
-                    },
-                    "transition": transition,
-                },
-                "safety": so.to_dict(),
-                "auto_recovery": (
-                    (meta.get("integration") or {}).get("auto_recovery", {})
-                    if isinstance(meta.get("integration"), dict)
-                    else {}
-                ),
-            }
+            self._run_phase03(req=req, meta=meta, safety_flag=safety_flag)
         except Exception:
             pass
         t_marks["phase03"] = time.perf_counter()
 
         # ---- 5.7) Guardrails (Phase01/07 + Phase02 freeze merge) ----
         try:
-            guardrail = self._guardrail.decide(
-                telemetry=meta.get("telemetry"),
-                continuity=meta.get("continuity"),
-                narrative=meta.get("narrative"),
-                integrity_flags=meta.get("integrity_flags"),
-                integration=meta.get("integration"),
-            )
-            meta["guardrail"] = guardrail.to_dict()
+            if self._should_run_guardrail(req=req):
+                guardrail = self._guardrail.decide(
+                    telemetry=meta.get("telemetry"),
+                    continuity=meta.get("continuity"),
+                    narrative=meta.get("narrative"),
+                    integrity_flags=meta.get("integrity_flags"),
+                    integration=meta.get("integration"),
+                )
+                meta["guardrail"] = guardrail.to_dict()
 
-            if isinstance(getattr(req, "metadata", None), dict):
-                req.metadata["_freeze_updates"] = bool(req.metadata.get("_freeze_updates") or guardrail.freeze_updates)
-                req.metadata["_guardrail_system_rules"] = guardrail.system_rules
-                req.metadata["_guardrail_disclosures"] = guardrail.disclosures
-            self._freeze_updates = bool(self._freeze_updates or guardrail.freeze_updates)
+                if isinstance(getattr(req, "metadata", None), dict):
+                    req.metadata["_freeze_updates"] = bool(req.metadata.get("_freeze_updates") or guardrail.freeze_updates)
+                    req.metadata["_guardrail_system_rules"] = guardrail.system_rules
+                    req.metadata["_guardrail_disclosures"] = guardrail.disclosures
+                self._freeze_updates = bool(self._freeze_updates or guardrail.freeze_updates)
+            else:
+                meta["guardrail"] = {"enabled": False, "skipped_compact_mode": True}
         except Exception:
             pass
         t_marks["guardrail"] = time.perf_counter()
 
         # ---- 5.8) Naturalness (turn-taking / style control) ----
         allow_choices = False
-        applied_naturalness = False
+        should_finalize_naturalness = False
         roleplay_policy = None
         try:
             session_id = str(getattr(req, "session_id", "") or "").strip()
@@ -1333,17 +1175,18 @@ class PersonaController:
 
             # Naturalness injection can conflict with strict character roleplay (e.g., 2-choice prompts).
             if getattr(roleplay_policy, "disable_naturalness_injection", False):
-                applied_naturalness = False
                 # Keep allow_choices conservative: roleplay may still want short choices.
                 allow_choices = True
                 meta["naturalness"] = {
                     "enabled": False,
                     "skipped_by_roleplay_policy": True,
                 }
+            elif not self._should_apply_naturalness(req=req):
+                meta["naturalness"] = {"enabled": False, "skipped_compact_mode": True}
             else:
                 nat = self._apply_naturalness_policy(req=req, session_id=session_id, meta=meta)
-                applied_naturalness = True
                 allow_choices = bool(nat.get("allow_choices"))
+                should_finalize_naturalness = True
         except Exception:
             pass
 
@@ -1395,7 +1238,7 @@ class PersonaController:
 
         # ---- 6.5) Naturalness self-correction (post) ----
         try:
-            if applied_naturalness:
+            if should_finalize_naturalness:
                 session_id = str(getattr(req, "session_id", "") or "").strip()
                 self._finalize_naturalness_policy(
                     req=req,
@@ -1526,556 +1369,75 @@ class PersonaController:
         """
 
         log = get_logger(__name__)
-        trace_id: Optional[str]
-        try:
-            trace_id = (getattr(req, "metadata", None) or {}).get("_trace_id")
-        except Exception:
-            trace_id = None
-
-        def _trace(event: str, fields: Optional[Dict[str, Any]] = None) -> None:
-            if not trace_id:
-                return
-            trace_event(
-                log,
-                trace_id=str(trace_id),
-                event=f"persona_controller.{event}",
-                fields=fields,
-            )
-
-        uid: Optional[str] = (
-            user_id or self._config.default_user_id or getattr(req, "user_id", None)
-        )
-
-        meta: Dict[str, Any] = {}
-        turn_trace_id = str(trace_id or uuid.uuid4())
-        meta["trace_id"] = turn_trace_id
-        try:
-            if isinstance(getattr(req, "metadata", None), dict):
-                req.metadata["_trace_id"] = turn_trace_id
-        except Exception:
-            pass
-        t0 = time.perf_counter()
-        t_marks: Dict[str, float] = {"start": t0}
-
-        _trace(
-            "start",
-            {
-                "user_id": uid,
-                "session_id": getattr(req, "session_id", None),
-                "message_len": len(getattr(req, "message", "") or ""),
-                "message_preview": preview_text(getattr(req, "message", "")) if TRACE_INCLUDE_TEXT else "",
-                "safety_flag": safety_flag,
-                "overload_score": overload_score,
-                "reward_signal": reward_signal,
-                "stream": True,
-            },
-        )
-
-        # ---- 1) Memory selection ----
-        memory_result = self._select_memory(req=req, user_id=uid)
-        t_marks["memory"] = time.perf_counter()
-        t_marks["memory"] = time.perf_counter()
-        meta["memory"] = {
-            "pointer_count": len(memory_result.pointers),
-            "has_merged_summary": memory_result.merged_summary is not None,
-            "raw": memory_result.raw,
-        }
-        _trace(
-            "memory_selected",
-            {
-                "pointer_count": len(memory_result.pointers),
-                "has_merged_summary": memory_result.merged_summary is not None,
-            },
-        )
-
-        # ---- 2) Identity continuity ----
-        identity_result = self._identity.build_identity_context(req=req, memory=memory_result)
-        t_marks["identity"] = time.perf_counter()
-        _trace(
-            "identity_built",
-            {
-                "topic_label": (identity_result.identity_context or {}).get("topic_label"),
-                "has_past_context": (identity_result.identity_context or {}).get("has_past_context"),
-            },
-        )
-
-        # ---- 2.5) Phase02: provide TemporalIdentity signals to drift engines (optional) ----
-        try:
-            if isinstance(getattr(req, "metadata", None), dict) and self._temporal_identity_state is not None:
-                req.metadata["_tid_inertia"] = float(getattr(self._temporal_identity_state, "inertia", 0.0) or 0.0)
-                req.metadata["_tid_stability_budget"] = float(
-                    getattr(self._temporal_identity_state, "stability_budget", 1.0) or 1.0
-                )
-                mid = getattr(self._temporal_identity_state, "middle_anchor", None) or {}
-                if isinstance(mid, dict) and isinstance(mid.get("value"), dict):
-                    req.metadata["_value_anchor"] = mid.get("value") or {}
-        except Exception:
-            pass
-
-        # ---- 3) Value drift ----
-        drift_db = None if defer_persistence else self._db
-        value_result = self._value.apply(
-            current=self._value_state,
+        turn, _trace = self._begin_turn(
             req=req,
-            memory=memory_result,
-            identity=identity_result,
-            reward_signal=reward_signal,
+            user_id=user_id,
             safety_flag=safety_flag,
-            db=drift_db,
-            user_id=uid,
+            overload_score=overload_score,
+            reward_signal=reward_signal,
+            stream=True,
         )
-        self._value_state = value_result.new_state
-        _trace("value_drift", {"delta": getattr(value_result, "delta", None)})
+        uid = turn.uid
+        meta = turn.meta
+        t0 = turn.t0
+        t_marks = turn.t_marks
 
-        # ---- 4) Trait drift (uses baseline) ----
-        trait_result = self._trait.apply(
-            current=self._trait_state,
-            baseline=self._trait_baseline,
+        prepared = self._prepare_turn_state(
             req=req,
-            memory=memory_result,
-            identity=identity_result,
-            value_state=self._value_state,
+            uid=uid,
+            safety_flag=safety_flag,
+            overload_score=overload_score,
+            reward_signal=reward_signal,
             affect_signal=affect_signal,
-            db=drift_db,
-            user_id=uid,
+            meta=meta,
+            t_marks=t_marks,
+            drift_db=(None if defer_persistence else self._db),
+            _trace=_trace,
         )
-        self._trait_state = trait_result.new_state
-        _trace("trait_drift", {"delta": getattr(trait_result, "delta", None)})
+        memory_result = prepared.memory_result
+        identity_result = prepared.identity_result
+        value_result = prepared.value_result
+        trait_result = prepared.trait_result
+        baseline_delta = prepared.baseline_delta
+        global_state_ctx = prepared.global_state_ctx
 
-        # ---- 4.5) Trait baseline update (slow learning) ----
-        baseline_delta = self._update_trait_baseline(
-            reward_signal=reward_signal,
-            safety_flag=safety_flag,
-            overload_score=overload_score,
-        )
-
-        # ---- 5) Global FSM ----
-        global_state_ctx = self._fsm.decide(
-            req=req,
-            memory=memory_result,
-            identity=identity_result,
-            value_state=self._value_state,
-            trait_state=self._trait_state,
-            safety_flag=safety_flag,
-            overload_score=overload_score,
-            prev_state=self._prev_global_state,
-        )
-        self._prev_global_state = global_state_ctx.state
-        t_marks["global_fsm"] = time.perf_counter()
-        _trace("global_state", {"state": getattr(global_state_ctx, "state", None)})
-
-        # ---- 5.25) Narrative / contradiction (Phase02 MD-03 health snapshot) ----
-        try:
-            meta["narrative"] = self._narrative.build(
-                identity=identity_result,
-                memory=memory_result,
-                global_state=global_state_ctx,
-                safety_flag=safety_flag,
-            ).to_dict()
-        except Exception:
-            meta["narrative"] = {}
-
-        # ---- 5.3) Continuity ----
-        try:
-            continuity = self._continuity.compute(
-                identity=identity_result,
-                memory=memory_result,
-                global_state=global_state_ctx,
-                telemetry_ema=None,
-                overload_score=overload_score,
-                safety_flag=safety_flag,
-            )
-            meta["continuity"] = continuity.to_dict()
-        except Exception:
-            meta["continuity"] = {}
-
-        # ---- 5.4) Ego continuity ----
+        # ---- 5.25-5.6) Compact observability ----
         telemetry = None
-        ego_state_to_persist: Optional[Dict[str, Any]] = None
-        ego_id_to_persist: Optional[str] = None
-        ego_version_to_persist: Optional[int] = None
-
-        tid_state_to_persist: Optional[Dict[str, Any]] = None
-        subjectivity_to_persist: Optional[Dict[str, Any]] = None
-        failure_to_persist: Optional[Dict[str, Any]] = None
-        identity_snapshot_to_persist: Optional[Dict[str, Any]] = None
-        integration_events_to_persist: Optional[List[Dict[str, Any]]] = None
-
-        try:
-            ego_update = self._ego.update(
-                prev=self._ego_state,
-                user_id=str(uid or ""),
-                session_id=getattr(req, "session_id", None),
-                identity=identity_result,
-                memory=memory_result,
-                value_state=self._value_state,
-                trait_state=self._trait_state,
-                global_state=global_state_ctx,
-                telemetry=None,
-                continuity=meta.get("continuity"),
-                narrative=meta.get("narrative"),
-                overload_score=overload_score,
-                drift_mag=None,
-            )
-            self._ego_state = ego_update.state
-            meta["ego"] = ego_update.summary
-            meta["integrity_flags"] = ego_update.integrity_flags
-
-            try:
-                ego_state_to_persist = ego_update.state.to_dict()
-                ego_id_to_persist = str(ego_update.state.ego_id)
-                ego_version_to_persist = int(getattr(ego_update.state, "version", 1) or 1)
-            except Exception:
-                ego_state_to_persist = None
-        except Exception:
-            pass
-
-        # ---- 5.5) Telemetry (Phase02 C/N/M/S/R) ----
-        try:
-            safety_risk = None
-            if isinstance(getattr(req, "metadata", None), dict):
-                safety_risk = req.metadata.get("_safety_risk_score")
-            telemetry = self._telemetry.compute(
-                identity=identity_result,
-                memory=memory_result,
-                value_state=self._value_state,
-                trait_state=self._trait_state,
-                global_state=global_state_ctx,
-                safety_flag=safety_flag,
-                overload_score=overload_score,
-                narrative=meta.get("narrative"),
-                continuity=meta.get("continuity"),
-                ego_summary=meta.get("ego"),
-                value_delta=getattr(value_result, "delta", None),
-                trait_delta=getattr(trait_result, "delta", None),
-                safety_risk_score=(float(safety_risk) if safety_risk is not None else None),
-            )
-            meta["telemetry"] = telemetry.to_dict()
-
-            if not defer_persistence and self._db is not None and hasattr(self._db, "store_telemetry_snapshot"):
-                try:
-                    self._db.store_telemetry_snapshot(
-                        user_id=uid,
-                        session_id=getattr(req, "session_id", None),
-                        scores=telemetry.scores,
-                        ema=telemetry.ema,
-                        flags=telemetry.flags,
-                        reasons=telemetry.reasons,
-                        meta={"trace_id": (getattr(req, "metadata", None) or {}).get("_trace_id")},
-                    )
-                except Exception:
-                    pass
-        except Exception:
-            telemetry = None
+        _apply_compact_observability(meta)
         t_marks["telemetry"] = time.perf_counter()
 
-        # ---- 5.6) Integration layer (Phase02 MD-07) ----
         try:
-            drift_mag = 0.0
-            if telemetry is not None:
-                try:
-                    drift_mag = float(getattr(telemetry, "reasons", {}).get("drift_mag") or 0.0)  # type: ignore
-                except Exception:
-                    drift_mag = 0.0
-            open_contradictions = int((meta.get("ego") or {}).get("open_contradictions", 0) or 0)
-            contradiction_limit = int(os.getenv("SIGMARIS_CONTRADICTION_OPEN_LIMIT", "6") or "6")
-            contradiction_pressure = min(1.0, float(open_contradictions) / float(max(1, contradiction_limit)))
-
-            integration, new_tid_state, _phase_event = self._integration.process(
-                prev_temporal_identity=self._temporal_identity_state,
-                scores=(getattr(telemetry, "scores", None) or {}) if telemetry is not None else {},
-                continuity=meta.get("continuity") or {},
-                narrative=meta.get("narrative") or {},
-                value_meta=(self._value_state.to_dict() if hasattr(self._value_state, "to_dict") else {}),
-                self_meta=meta.get("ego") or {},
-                drift_magnitude=float(drift_mag),
-                contradiction_pressure=float(contradiction_pressure),
-                external_overwrite_suspected=False,
-                trigger_reconstruction=bool((meta.get("narrative") or {}).get("collapse_suspected", False)),
-                operator_subjectivity_mode=(
-                    (getattr(req, "metadata", None) or {}).get("_operator_subjectivity_mode")
-                    if isinstance(getattr(req, "metadata", None), dict)
-                    else None
-                ),
-                trace_id=(getattr(req, "metadata", None) or {}).get("_trace_id"),
-                value_state=self._value_state,
-                trait_state=self._trait_state,
-                ego_state=self._ego_state,
-            )
-            self._temporal_identity_state = new_tid_state
-            meta["integration"] = integration.to_dict()
-
-            # Phase02 Failure -> Phase03 Auto Recovery (best-effort)
-            try:
-                sid = getattr(req, "session_id", None)
-                session_id_str = str(sid) if sid is not None else ""
-                auto_recovery = self._decide_auto_recovery(session_id=session_id_str, failure=(integration.failure or {}))
-
-                try:
-                    if isinstance(meta.get("integration"), dict):
-                        meta["integration"]["auto_recovery"] = auto_recovery
-                        if isinstance(meta["integration"].get("events"), list) and bool(auto_recovery.get("active")):
-                            meta["integration"]["events"].append(
-                                {"event_type": "AUTO_RECOVERY", "at": time.time(), "payload": auto_recovery}
-                            )
-                except Exception:
-                    pass
-
-                try:
-                    if bool(auto_recovery.get("active")):
-                        if integration.events is None:
-                            integration.events = []
-                        if isinstance(integration.events, list):
-                            integration.events.append(
-                                {"event_type": "AUTO_RECOVERY", "at": time.time(), "payload": auto_recovery}
-                            )
-                except Exception:
-                    pass
-
-                if isinstance(getattr(req, "metadata", None), dict):
-                    req.metadata["_phase03_forced_dialogue_state"] = str(auto_recovery.get("forced_dialogue_state") or "")
-                    req.metadata["_phase03_stop_memory_injection"] = bool(auto_recovery.get("stop_memory_injection") or False)
-            except Exception:
-                pass
-
-            if isinstance(getattr(req, "metadata", None), dict):
-                req.metadata["_freeze_updates"] = bool(req.metadata.get("_freeze_updates") or integration.freeze_updates)
-            self._freeze_updates = bool(self._freeze_updates or integration.freeze_updates)
-
-            tid_state_to_persist = new_tid_state.to_dict()
-            subjectivity_to_persist = integration.subjectivity or {}
-            failure_to_persist = integration.failure or {}
-            identity_snapshot_to_persist = integration.identity_snapshot or {}
-            integration_events_to_persist = integration.events or []
-
-            if not defer_persistence and self._db is not None:
-                trace_id_local = (getattr(req, "metadata", None) or {}).get("_trace_id")
-                session_id_local = getattr(req, "session_id", None)
-
-                if hasattr(self._db, "store_temporal_identity_snapshot"):
-                    try:
-                        self._db.store_temporal_identity_snapshot(
-                            user_id=uid,
-                            session_id=session_id_local,
-                            trace_id=trace_id_local,
-                            ego_id=str(new_tid_state.ego_id),
-                            state=tid_state_to_persist,
-                            telemetry=(integration.temporal_identity or {}),
-                        )
-                    except Exception:
-                        pass
-                if hasattr(self._db, "store_subjectivity_snapshot"):
-                    try:
-                        self._db.store_subjectivity_snapshot(
-                            user_id=uid,
-                            session_id=session_id_local,
-                            trace_id=trace_id_local,
-                            subjectivity=subjectivity_to_persist,
-                        )
-                    except Exception:
-                        pass
-                if hasattr(self._db, "store_failure_snapshot"):
-                    try:
-                        self._db.store_failure_snapshot(
-                            user_id=uid,
-                            session_id=session_id_local,
-                            trace_id=trace_id_local,
-                            failure=failure_to_persist,
-                        )
-                    except Exception:
-                        pass
-                if hasattr(self._db, "store_identity_snapshot"):
-                    try:
-                        self._db.store_identity_snapshot(
-                            user_id=uid,
-                            session_id=session_id_local,
-                            trace_id=trace_id_local,
-                            snapshot=identity_snapshot_to_persist,
-                        )
-                    except Exception:
-                        pass
-                if hasattr(self._db, "store_integration_events"):
-                    try:
-                        self._db.store_integration_events(
-                            user_id=uid,
-                            session_id=session_id_local,
-                            trace_id=trace_id_local,
-                            events=integration_events_to_persist,
-                        )
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        # ---- 5.65) Phase03: Intent + DSM + Safety Override + Observability ----
-        try:
-            session_id = getattr(req, "session_id", None) or ""
-            if not isinstance(session_id, str):
-                session_id = str(session_id)
-
-            if session_id and session_id not in self._intent_ema_by_session:
-                if len(self._intent_ema_by_session) >= self._phase03_session_cap:
-                    try:
-                        k0 = next(iter(self._intent_ema_by_session.keys()))
-                        self._intent_ema_by_session.pop(k0, None)
-                        self._dialogue_state_by_session.pop(k0, None)
-                    except Exception:
-                        self._intent_ema_by_session.clear()
-                        self._dialogue_state_by_session.clear()
-
-            md = (getattr(req, "metadata", None) or {}) if isinstance(getattr(req, "metadata", None), dict) else {}
-            iv = self._intent_layers.compute(message=getattr(req, "message", "") or "", metadata=md)
-
-            ema = self._intent_ema_by_session.get(session_id)
-            if ema is None:
-                ema = IntentVectorEMA(alpha=float(os.getenv("SIGMARIS_PHASE03_INTENT_EMA_ALPHA", "0.18") or "0.18"))
-                self._intent_ema_by_session[session_id] = ema
-            intent_ema = ema.update(iv.raw)
-
-            safety_risk_score = md.get("_safety_risk_score")
-            safety_categories = md.get("_safety_categories") if isinstance(md.get("_safety_categories"), dict) else None
-
-            so = self._safety_override.decide(
-                safety_flag=safety_flag,
-                safety_risk_score=(float(safety_risk_score) if safety_risk_score is not None else None),
-                intent_safety_risk=float(intent_ema.get("safety_risk", 0.0)),
-                categories=safety_categories,
-            )
-            safety_forced = bool(so.active and so.level in ("hard", "terminate"))
-
-            subj_mode = None
-            try:
-                subj_mode = (meta.get("integration") or {}).get("subjectivity", {}).get("mode")
-            except Exception:
-                subj_mode = None
-
-            prev_ds = self._dialogue_state_by_session.get(session_id)
-            ds, transition = self._dsm.decide(
-                prev=prev_ds,
-                intent_ema=intent_ema,
-                intent_confidence=float(iv.confidence),
-                safety_forced=safety_forced,
-                safety_active=bool(so.active),
-                subjectivity_mode=(str(subj_mode) if subj_mode is not None else None),
-                transition_reasons=[],
-            )
-
-            # Auto recovery may force dialogue state regardless of intent/DSM hysteresis.
-            try:
-                forced = md.get("_phase03_forced_dialogue_state")
-                if isinstance(forced, str) and forced in STATE_IDS and forced != ds.current_state:
-                    t_force = time.time()
-                    ds = DialogueState(
-                        current_state=forced,
-                        prev_state=ds.current_state,
-                        entered_at=t_force,
-                        confidence=1.0,
-                        stability_score=1.0,
-                        last_transition_reason="auto_recovery",
-                    )
-                    transition = {
-                        "from": transition.get("from") or (prev_ds.current_state if prev_ds else None),
-                        "to": forced,
-                        "trigger": "auto_recovery",
-                        "hysteresis_applied": False,
-                        "dwell_ms": 0,
-                        "reasons": list(transition.get("reasons") or []) + ["auto_recovery_forced"],
-                        "subjectivity_mode": subj_mode,
-                    }
-            except Exception:
-                pass
-            if session_id:
-                self._dialogue_state_by_session[session_id] = ds
-
-            gen = md.get("gen") if isinstance(md.get("gen"), dict) else {}
-            if not isinstance(gen, dict):
-                gen = {}
-            if "temperature" not in gen or not isinstance(gen.get("temperature"), (int, float)):
-                temp_map = {
-                    "S1_CASUAL": 0.85,
-                    "S2_TASK": 0.45,
-                    "S3_EMOTIONAL": 0.60,
-                    "S4_META": 0.50,
-                    "S5_CREATIVE": 0.95,
-                    "S6_SAFETY": 0.25,
-                    "S0_NEUTRAL": 0.70,
-                }
-                gen["temperature"] = float(temp_map.get(ds.current_state, 0.70))
-            if "max_tokens" not in gen or not isinstance(gen.get("max_tokens"), (int, float)):
-                max_map = {
-                    "S1_CASUAL": 700,
-                    "S2_TASK": 1600,
-                    "S3_EMOTIONAL": 1200,
-                    "S4_META": 1400,
-                    "S5_CREATIVE": 1800,
-                    "S6_SAFETY": 700,
-                    "S0_NEUTRAL": 1400,
-                }
-                gen["max_tokens"] = int(max_map.get(ds.current_state, 1400))
-
-            if isinstance(getattr(req, "metadata", None), dict):
-                req.metadata["gen"] = gen
-                req.metadata["_phase03_dialogue_state"] = ds.current_state
-
-            meta["phase03"] = {
-                "timing_ms": {},  # filled at end
-                "intent": {
-                    "category": {
-                        "scores": iv.category_scores,
-                        "primary": iv.primary,
-                        "secondary": iv.secondary,
-                    },
-                    "vector": {"raw": iv.raw, "ema": intent_ema},
-                    "confidence": float(iv.confidence),
-                },
-                "routing": {
-                    "strategy": "hybrid",
-                    "target_state": ds.current_state,
-                    "transition_confidence": float(ds.confidence),
-                    "reasons": transition.get("reasons", []),
-                },
-                "dialogue": {
-                    "state": {
-                        "current": ds.current_state,
-                        "previous": ds.prev_state,
-                        "stability": float(getattr(ds, "stability_score", 0.0) or 0.0),
-                    },
-                    "transition": transition,
-                },
-                "safety": so.to_dict(),
-                "auto_recovery": (
-                    (meta.get("integration") or {}).get("auto_recovery", {})
-                    if isinstance(meta.get("integration"), dict)
-                    else {}
-                ),
-            }
+            self._run_phase03(req=req, meta=meta, safety_flag=safety_flag)
         except Exception:
             pass
         t_marks["phase03"] = time.perf_counter()
 
         # ---- 5.7) Guardrails ----
         try:
-            guardrail = self._guardrail.decide(
-                telemetry=meta.get("telemetry"),
-                continuity=meta.get("continuity"),
-                narrative=meta.get("narrative"),
-                integrity_flags=meta.get("integrity_flags"),
-                integration=meta.get("integration"),
-            )
-            meta["guardrail"] = guardrail.to_dict()
+            if self._should_run_guardrail(req=req):
+                guardrail = self._guardrail.decide(
+                    telemetry=meta.get("telemetry"),
+                    continuity=meta.get("continuity"),
+                    narrative=meta.get("narrative"),
+                    integrity_flags=meta.get("integrity_flags"),
+                    integration=meta.get("integration"),
+                )
+                meta["guardrail"] = guardrail.to_dict()
 
-            if isinstance(getattr(req, "metadata", None), dict):
-                req.metadata["_freeze_updates"] = bool(req.metadata.get("_freeze_updates") or guardrail.freeze_updates)
-                req.metadata["_guardrail_system_rules"] = guardrail.system_rules
-                req.metadata["_guardrail_disclosures"] = guardrail.disclosures
-            self._freeze_updates = bool(self._freeze_updates or guardrail.freeze_updates)
+                if isinstance(getattr(req, "metadata", None), dict):
+                    req.metadata["_freeze_updates"] = bool(req.metadata.get("_freeze_updates") or guardrail.freeze_updates)
+                    req.metadata["_guardrail_system_rules"] = guardrail.system_rules
+                    req.metadata["_guardrail_disclosures"] = guardrail.disclosures
+                self._freeze_updates = bool(self._freeze_updates or guardrail.freeze_updates)
+            else:
+                meta["guardrail"] = {"enabled": False, "skipped_compact_mode": True}
         except Exception:
             pass
         t_marks["guardrail"] = time.perf_counter()
 
         # ---- 5.8) Naturalness (turn-taking / style control) ----
         allow_choices = False
-        applied_naturalness = False
+        should_finalize_naturalness = False
         roleplay_policy = None
         try:
             session_id = str(getattr(req, "session_id", "") or "").strip()
@@ -2113,16 +1475,17 @@ class PersonaController:
                     pass
 
             if getattr(roleplay_policy, "disable_naturalness_injection", False):
-                applied_naturalness = False
                 allow_choices = True
                 meta["naturalness"] = {
                     "enabled": False,
                     "skipped_by_roleplay_policy": True,
                 }
+            elif not self._should_apply_naturalness(req=req):
+                meta["naturalness"] = {"enabled": False, "skipped_compact_mode": True}
             else:
                 nat = self._apply_naturalness_policy(req=req, session_id=session_id, meta=meta)
-                applied_naturalness = True
                 allow_choices = bool(nat.get("allow_choices"))
+                should_finalize_naturalness = True
         except Exception:
             pass
 
@@ -2197,7 +1560,7 @@ class PersonaController:
 
         # ---- 6.5) Naturalness self-correction (post) ----
         try:
-            if applied_naturalness:
+            if should_finalize_naturalness:
                 session_id = str(getattr(req, "session_id", "") or "").strip()
                 self._finalize_naturalness_policy(
                     req=req,
@@ -2258,99 +1621,6 @@ class PersonaController:
                                     "baseline": self._trait_baseline.to_dict(),
                                     "baseline_delta": baseline_delta,
                                 },
-                            )
-                    except Exception:
-                        pass
-
-                    try:
-                        if telemetry is not None and hasattr(self._db, "store_telemetry_snapshot"):
-                            self._db.store_telemetry_snapshot(
-                                user_id=uid,
-                                session_id=getattr(req, "session_id", None),
-                                scores=getattr(telemetry, "scores", None) or {},
-                                ema=getattr(telemetry, "ema", None) or {},
-                                flags=getattr(telemetry, "flags", None) or {},
-                                reasons=getattr(telemetry, "reasons", None) or {},
-                                meta={"trace_id": trace_id_local},
-                            )
-                    except Exception:
-                        pass
-
-                    try:
-                        if (
-                            ego_state_to_persist is not None
-                            and ego_id_to_persist is not None
-                            and ego_version_to_persist is not None
-                            and hasattr(self._db, "store_ego_snapshot")
-                        ):
-                            self._db.store_ego_snapshot(
-                                user_id=uid,
-                                session_id=getattr(req, "session_id", None),
-                                ego_id=ego_id_to_persist,
-                                version=int(ego_version_to_persist),
-                                state=ego_state_to_persist,
-                                meta={"trace_id": trace_id_local},
-                            )
-                    except Exception:
-                        pass
-
-                    # ---- Phase02 snapshots (best-effort) ----
-                    try:
-                        if (
-                            tid_state_to_persist is not None
-                            and hasattr(self._db, "store_temporal_identity_snapshot")
-                        ):
-                            self._db.store_temporal_identity_snapshot(
-                                user_id=uid,
-                                session_id=getattr(req, "session_id", None),
-                                trace_id=trace_id_local,
-                                ego_id=str((tid_state_to_persist or {}).get("ego_id") or ""),
-                                state=tid_state_to_persist,
-                                telemetry=((meta.get("integration") or {}).get("temporal_identity") or {}),
-                            )
-                    except Exception:
-                        pass
-
-                    try:
-                        if subjectivity_to_persist is not None and hasattr(self._db, "store_subjectivity_snapshot"):
-                            self._db.store_subjectivity_snapshot(
-                                user_id=uid,
-                                session_id=getattr(req, "session_id", None),
-                                trace_id=trace_id_local,
-                                subjectivity=subjectivity_to_persist,
-                            )
-                    except Exception:
-                        pass
-
-                    try:
-                        if failure_to_persist is not None and hasattr(self._db, "store_failure_snapshot"):
-                            self._db.store_failure_snapshot(
-                                user_id=uid,
-                                session_id=getattr(req, "session_id", None),
-                                trace_id=trace_id_local,
-                                failure=failure_to_persist,
-                            )
-                    except Exception:
-                        pass
-
-                    try:
-                        if identity_snapshot_to_persist is not None and hasattr(self._db, "store_identity_snapshot"):
-                            self._db.store_identity_snapshot(
-                                user_id=uid,
-                                session_id=getattr(req, "session_id", None),
-                                trace_id=trace_id_local,
-                                snapshot=identity_snapshot_to_persist,
-                            )
-                    except Exception:
-                        pass
-
-                    try:
-                        if integration_events_to_persist is not None and hasattr(self._db, "store_integration_events"):
-                            self._db.store_integration_events(
-                                user_id=uid,
-                                session_id=getattr(req, "session_id", None),
-                                trace_id=trace_id_local,
-                                events=integration_events_to_persist,
                             )
                     except Exception:
                         pass

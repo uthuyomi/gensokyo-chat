@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+
+import { useLanguage } from "@/components/i18n/LanguageProvider";
 import { supabaseBrowser } from "@/lib/supabaseClient";
 
 const DEV_EMAIL = "kaiseif4e@gmail.com";
@@ -24,6 +26,7 @@ export function getDevCoreModeClient(): CoreMode {
 }
 
 export default function DevCoreToggle() {
+  const { lang } = useLanguage();
   const [allowed, setAllowed] = useState(false);
   const [mode, setMode] = useState<CoreMode>(() => readMode());
 
@@ -44,16 +47,37 @@ export default function DevCoreToggle() {
     };
   }, []);
 
-  const label = useMemo(() => (mode === "local" ? "ローカル (127.0.0.1:8000)" : "Fly (project-sigmaris.fly.dev)"), [mode]);
+  const copy = useMemo(
+    () =>
+      lang === "ja"
+        ? {
+            title: "Core 接続先（開発用）",
+            description:
+              "ログイン中のユーザーが開発アカウントのときだけ表示されます。デスクトップ版や検証時に、接続先を Fly とローカルで切り替えるための隠しスイッチです。",
+            local: "ローカル",
+            current: "現在",
+          }
+        : {
+            title: "Core target (dev only)",
+            description:
+              "This section only appears for the development account. Use it to switch the core endpoint between Fly and local while testing desktop behavior.",
+            local: "Local",
+            current: "Current",
+          },
+    [lang],
+  );
+
+  const label = useMemo(
+    () => (mode === "local" ? `${copy.local} (127.0.0.1:8000)` : "Fly (project-sigmaris.fly.dev)"),
+    [copy.local, mode],
+  );
 
   if (!allowed) return null;
 
   return (
     <section className="rounded-2xl border bg-card/60 p-5">
-      <h2 className="font-medium">Core接続先（開発用）</h2>
-      <p className="mt-1 text-muted-foreground text-sm">
-        ログイン中ユーザーが開発者アカウントの場合のみ表示されます。変更は次回送信から反映されます。
-      </p>
+      <h2 className="font-medium">{copy.title}</h2>
+      <p className="mt-1 text-sm text-muted-foreground">{copy.description}</p>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <button
@@ -80,14 +104,13 @@ export default function DevCoreToggle() {
             writeMode("local");
           }}
         >
-          ローカル
+          {copy.local}
         </button>
 
         <div className="ml-2 text-xs text-muted-foreground">
-          現在: <span className="font-mono text-foreground/80">{label}</span>
+          {copy.current}: <span className="font-mono text-foreground/80">{label}</span>
         </div>
       </div>
     </section>
   );
 }
-

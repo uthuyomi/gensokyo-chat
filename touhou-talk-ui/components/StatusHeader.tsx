@@ -6,7 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { supabaseBrowser } from "@/lib/supabaseClient";
 import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
+import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { CogIcon, LogOutIcon, UserIcon } from "lucide-react";
 
 export default function StatusHeader() {
@@ -52,7 +52,7 @@ export default function StatusHeader() {
   return (
     <header className="relative z-30 h-12">
       <div className="flex h-full items-center justify-end gap-3 px-4">
-        <div className="flex min-w-0 items-center gap-2 text-white/90">
+        <div className="flex min-w-0 items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-2 py-1.5 text-white/90 backdrop-blur">
           <Avatar className="size-8 border border-white/20 bg-black/20">
             <AvatarImage src={avatarUrl ?? undefined} alt="User avatar" />
             <AvatarFallback>
@@ -64,28 +64,29 @@ export default function StatusHeader() {
           </div>
         </div>
 
-        <Button
+        <TooltipIconButton
+          tooltip="Settings"
           asChild
-          size="sm"
           variant="secondary"
-          className="bg-white/80 text-black hover:bg-white"
+          size="icon-sm"
+          className="rounded-xl bg-white/80 text-black hover:bg-white"
         >
-          <Link href="/settings">
-            <CogIcon className="mr-2 size-4" />
-            設定
+          <Link href="/settings" aria-label="Settings">
+            <CogIcon className="size-4" />
           </Link>
-        </Button>
+        </TooltipIconButton>
 
-        <Button
+        <TooltipIconButton
           type="button"
           onClick={logout}
-          size="sm"
+          tooltip="Log out"
           variant="secondary"
-          className="bg-white/80 text-black hover:bg-white"
+          size="icon-sm"
+          className="rounded-xl bg-white/80 text-black hover:bg-white"
+          aria-label="Log out"
         >
-          <LogOutIcon className="mr-2 size-4" />
-          ログアウト
-        </Button>
+          <LogOutIcon className="size-4" />
+        </TooltipIconButton>
       </div>
     </header>
   );

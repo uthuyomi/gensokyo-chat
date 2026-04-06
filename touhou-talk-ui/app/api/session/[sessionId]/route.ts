@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseServer, requireUserId } from "@/lib/supabase-server";
+
+import { getAccessibleTouhouSession } from "@/lib/rooms/access";
+import { requireUser } from "@/lib/supabase-server";
+import { supabaseAdmin } from "@/lib/supabase-server";
 
 function looksLikeMissingColumn(err: unknown, column: string) {
   const msg =
@@ -9,28 +12,16 @@ function looksLikeMissingColumn(err: unknown, column: string) {
   return msg.includes(column) && (msg.includes("column") || msg.includes("schema"));
 }
 
-/* =========================
-   PATCH /api/session/[sessionId]
-   - タイトル編集 / chat_mode 更新
-========================= */
-
 export async function PATCH(
   req: NextRequest,
   context: { params: Promise<{ sessionId: string }> },
 ) {
   try {
     const { sessionId } = await context.params;
-
-    console.log(
-      "[/api/session/[id]][PATCH] cookie:",
-      req.headers.get("cookie"),
-    );
-
-    const supabase = await supabaseServer();
-    const userId = await requireUserId();
+    const user = await requireUser();
+    const supabase = supabaseAdmin();
 
     const body = (await req.json()) as { title?: unknown; chatMode?: unknown };
-
     const title = typeof body.title === "string" ? body.title.trim() : null;
     const chatMode = typeof body.chatMode === "string" ? body.chatMode : null;
 
@@ -49,24 +40,18 @@ export async function PATCH(
       }
     }
 
-    // 🔒 存在確認（他人・削除済み防止）
-    const { data: exists, error: selectError } = await supabase
-      .from("common_sessions")
-      .select("id")
-      .eq("id", sessionId)
-      .eq("user_id", userId)
-      .eq("app", "touhou")
-      .maybeSingle();
-
-    if (selectError || !exists) {
+    const session = await getAccessibleTouhouSession({ sessionId, user });
+    if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+    if (!session.isOwner) {
+      return NextResponse.json({ error: "Only the room owner can update room settings" }, { status: 403 });
     }
 
     const { error } = await supabase
       .from("common_sessions")
       .update(patch)
       .eq("id", sessionId)
-      .eq("user_id", userId)
       .eq("app", "touhou");
 
     if (error) {
@@ -90,46 +75,27 @@ export async function PATCH(
   }
 }
 
-/* =========================
-   DELETE /api/session/[sessionId]
-   - セッション削除（物理削除）
-========================= */
-
 export async function DELETE(
   req: NextRequest,
   context: { params: Promise<{ sessionId: string }> },
 ) {
   try {
     const { sessionId } = await context.params;
+    const user = await requireUser();
+    const supabase = supabaseAdmin();
 
-    console.log(
-      "[/api/session/[id]][DELETE] cookie:",
-      req.headers.get("cookie"),
-    );
-
-    const supabase = await supabaseServer();
-    const userId = await requireUserId();
-
-    // 🔒 存在確認（二重 delete / 他人防止）
-    const { data: exists, error: selectError } = await supabase
-      .from("common_sessions")
-      .select("id")
-      .eq("id", sessionId)
-      .eq("user_id", userId)
-      .eq("app", "touhou")
-      .maybeSingle();
-
-    if (selectError || !exists) {
+    const session = await getAccessibleTouhouSession({ sessionId, user });
+    if (!session) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
+    if (!session.isOwner) {
+      return NextResponse.json({ error: "Only the room owner can delete the room" }, { status: 403 });
+    }
 
-    // conversations を物理削除
-    // messages は DB 側で ON DELETE CASCADE 前提
     const { error } = await supabase
       .from("common_sessions")
       .delete()
       .eq("id", sessionId)
-      .eq("user_id", userId)
       .eq("app", "touhou");
 
     if (error) {

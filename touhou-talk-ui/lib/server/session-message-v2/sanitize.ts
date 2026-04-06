@@ -22,6 +22,69 @@ export function buildRecentUserText(params: {
   return parts.join("\n").toLowerCase();
 }
 
+function lastAssistantMessage(
+  history: Array<{ role: "user" | "assistant"; content: string }>,
+) {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m?.role === "assistant") return String(m.content ?? "").trim();
+  }
+  return "";
+}
+
+function genericAskbackPattern(chatMode: TouhouChatMode) {
+  const shared = [
+    "どう思う",
+    "どうしたい",
+    "何がしたい",
+    "何をしたい",
+    "何を求めてる",
+    "どう感じる",
+    "どう感じてる",
+    "どうしたい？",
+    "どう思う？",
+    "what do you think",
+    "what do you want",
+    "how do you feel",
+  ];
+  const coachExtra = ["どこから始める", "何を優先する"];
+  const items = chatMode === "coach" ? shared.filter((s) => !coachExtra.includes(s)) : shared;
+  const escaped = items.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`(?:${escaped.join("|")})[？?]?$`, "i");
+}
+
+function suppressGenericAskback(params: {
+  reply: string;
+  chatMode: TouhouChatMode;
+  history: Array<{ role: "user" | "assistant"; content: string }>;
+  currentUserText: string;
+}) {
+  const raw = String(params.reply ?? "").trim();
+  if (!raw) return raw;
+  const lines = raw.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (lines.length === 0) return raw;
+  const last = lines[lines.length - 1] ?? "";
+  const askbackRe = genericAskbackPattern(params.chatMode);
+  if (!askbackRe.test(last)) return raw;
+
+  const priorAssistant = lastAssistantMessage(params.history);
+  const userAskedQuestion = /[？?]/.test(String(params.currentUserText ?? ""));
+  const hasEnoughContent =
+    lines.slice(0, -1).join(" ").length >= 18 || raw.length >= 48;
+  const previousWasQuestion = /[？?]\s*$/.test(priorAssistant);
+
+  if (params.chatMode === "coach" && userAskedQuestion && !previousWasQuestion) {
+    return raw;
+  }
+  if (!hasEnoughContent) return raw;
+  if (!previousWasQuestion && userAskedQuestion && params.chatMode === "partner") {
+    return raw;
+  }
+
+  const next = lines.slice(0, -1).join("\n").trim();
+  return next || raw;
+}
+
 export function sanitizeReplyByContext(params: {
   characterId: string;
   chatMode: TouhouChatMode;
@@ -97,6 +160,14 @@ export function sanitizeReplyByContext(params: {
       );
     }
   }
+
+  // 5) Generic: trim repetitive ask-backs when the reply already contains substance.
+  out = suppressGenericAskback({
+    reply: out,
+    chatMode: params.chatMode,
+    history: params.history,
+    currentUserText: params.currentUserText,
+  });
 
   // Collapse excessive blank lines produced by removals.
   out = out.replace(/\n{3,}/g, "\n\n").trim();

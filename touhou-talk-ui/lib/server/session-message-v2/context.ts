@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { supabaseServer, requireUserId } from "@/lib/supabase-server";
+import { supabaseServer, requireUser } from "@/lib/supabase-server";
 import { resolveCoreBaseUrl } from "@/lib/server/session-message/core-base";
 import { loadCoreHistory } from "@/lib/server/session-message/history";
 import type { TouhouChatMode } from "@/lib/touhouPersona";
+import { getAccessibleTouhouSession } from "@/lib/rooms/access";
 
 import type { SessionMessageRouteContext } from "./types";
 
@@ -28,8 +29,11 @@ export async function buildSessionMessageContext(params: {
   }
 
   let userId: string;
+  let userEmail: string | null = null;
   try {
-    userId = await requireUserId();
+    const user = await requireUser();
+    userId = user.id;
+    userEmail = typeof user.email === "string" ? user.email : null;
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -81,18 +85,10 @@ export async function buildSessionMessageContext(params: {
     accessToken = null;
   }
 
-  const { data: conv, error: convError } = await supabase
-    .from("common_sessions")
-    .select("id, chat_mode, layer, location")
-    .eq("id", sessionId)
-    .eq("user_id", userId)
-    .eq("app", "touhou")
-    .maybeSingle();
-
-  if (convError) {
-    console.error("[touhou] conversation select error:", convError);
-    return NextResponse.json({ error: "DB error" }, { status: 500 });
-  }
+  const conv = await getAccessibleTouhouSession({
+    sessionId,
+    user: { id: userId, ...(userEmail ? { email: userEmail } : {}) },
+  });
 
   if (!conv) {
     return NextResponse.json(
@@ -102,9 +98,7 @@ export async function buildSessionMessageContext(params: {
   }
 
   const coreHistory = await loadCoreHistory({
-    supabase,
     sessionId,
-    userId,
     limit: 16,
   });
 

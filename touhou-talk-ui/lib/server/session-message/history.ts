@@ -1,18 +1,15 @@
-import type { supabaseServer } from "@/lib/supabase-server";
+import { supabaseAdmin } from "@/lib/supabase-server";
 
 export async function loadCoreHistory(params: {
-  supabase: Awaited<ReturnType<typeof supabaseServer>>;
   sessionId: string;
-  userId: string;
   limit?: number;
 }): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
   const limit = typeof params.limit === "number" ? params.limit : 16;
   try {
-    const { data } = await params.supabase
+    const { data } = await supabaseAdmin()
       .from("common_messages")
       .select("role, content, created_at")
       .eq("session_id", params.sessionId)
-      .eq("user_id", params.userId)
       .eq("app", "touhou")
       .order("created_at", { ascending: false })
       .limit(limit);

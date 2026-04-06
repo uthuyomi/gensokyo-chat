@@ -18,6 +18,8 @@ export async function parseSessionMessageRequestBody(
     const characterId = formData.get("characterId");
     const text = formData.get("text");
     const coreModeRaw = formData.get("coreMode");
+    const sceneModeRaw = formData.get("sceneMode");
+    const sceneTurnCountRaw = formData.get("sceneTurnCount");
 
     if (
         typeof characterId !== "string" ||
@@ -30,11 +32,21 @@ export async function parseSessionMessageRequestBody(
 
     const files = formData.getAll("files").filter((f): f is File => f instanceof File);
     const urls = extractUrls(text);
+    const sceneMode =
+        sceneModeRaw === "continue" ? "continue" : "chat";
+    const sceneTurnCountNumber =
+        typeof sceneTurnCountRaw === "string" ? Number(sceneTurnCountRaw) : NaN;
+    const sceneTurnCount =
+        sceneMode === "continue" && Number.isFinite(sceneTurnCountNumber)
+            ? Math.max(1, Math.min(4, Math.trunc(sceneTurnCountNumber)))
+            : 1;
 
     return {
         characterId,
         text,
         coreModeRaw,
+        sceneMode,
+        sceneTurnCount,
         files,
         urls,
     };
