@@ -1,10 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import { Analytics } from "@vercel/analytics/next";
+import { cookies } from "next/headers";
 import "./globals.css";
 import { TouhouThemeInit } from "@/components/TouhouThemeInit";
 import { EnvGuard } from "@/components/EnvGuard";
 import PwaRegister from "@/components/pwa/PwaRegister";
 import PwaBootRedirect from "@/components/pwa/PwaBootRedirect";
+import { LanguageProvider } from "@/components/i18n/LanguageProvider";
+import { LANGUAGE_COOKIE, readLanguageCookieValue } from "@/lib/i18n";
 
 function resolveSiteUrl(): string {
   const raw = String(process.env.NEXT_PUBLIC_SITE_URL ?? "").trim();
@@ -90,11 +93,13 @@ export const viewport: Viewport = {
   themeColor: "#05061a",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const cookieStore = await cookies();
+  const initialLanguage = readLanguageCookieValue(cookieStore.get(LANGUAGE_COOKIE)?.value);
   const publicConfig = {
     supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ?? "",
     supabaseAnonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
@@ -103,7 +108,7 @@ export default function RootLayout({
   };
 
   return (
-    <html lang="ja" suppressHydrationWarning>
+    <html lang={initialLanguage} suppressHydrationWarning>
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
@@ -124,10 +129,12 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-svh bg-background text-foreground antialiased">
-        <TouhouThemeInit />
-        <PwaRegister />
-        <PwaBootRedirect />
-        <EnvGuard>{children}</EnvGuard>
+        <LanguageProvider initialLanguage={initialLanguage}>
+          <TouhouThemeInit />
+          <PwaRegister />
+          <PwaBootRedirect />
+          <EnvGuard>{children}</EnvGuard>
+        </LanguageProvider>
         <Analytics />
       </body>
     </html>

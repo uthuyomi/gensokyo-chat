@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useTouhouUi } from "@/components/assistant-ui/touhou-ui-context";
+import { useLanguage } from "@/components/i18n/LanguageProvider";
 import {
   ActionBarMorePrimitive,
   ActionBarPrimitive,
@@ -31,10 +32,13 @@ import {
   DownloadIcon,
   MicIcon,
   MoreHorizontalIcon,
+  PaperclipIcon,
   PencilIcon,
   PlayIcon,
   RefreshCwIcon,
+  SparklesIcon,
   SquareIcon,
+  WandSparklesIcon,
 } from "lucide-react";
 import type { FC } from "react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -340,7 +344,7 @@ export const Thread: FC = () => {
         </DesktopTtsStateContext.Provider>
 
         <ThreadPrimitive.ViewportFooter
-          className="aui-thread-viewport-footer sticky bottom-0 mx-auto mt-auto flex w-full max-w-(--thread-max-width) flex-col gap-4 overflow-visible rounded-t-3xl pb-4 md:pb-6 max-lg:fixed max-lg:left-0 max-lg:right-0 max-lg:bottom-[calc(var(--app-vvb,0px)+env(safe-area-inset-bottom))] max-lg:z-40 max-lg:mx-0 max-lg:max-w-none max-lg:px-4 max-lg:pb-4 max-lg:bg-background/80 max-lg:backdrop-blur"
+          className="aui-thread-viewport-footer sticky bottom-0 mx-auto mt-auto flex w-full max-w-(--thread-max-width) flex-col gap-4 overflow-visible rounded-t-3xl bg-transparent pb-4 md:pb-6 max-lg:fixed max-lg:left-1/2 max-lg:bottom-[calc(var(--app-vvb,0px)+env(safe-area-inset-bottom))] max-lg:z-40 max-lg:w-[calc(100%-2rem)] max-lg:max-w-(--thread-max-width) max-lg:-translate-x-1/2 max-lg:px-0 max-lg:pb-4 max-lg:bg-transparent max-lg:backdrop-blur-0"
         >
           <ThreadScrollToBottom />
           <Composer />
@@ -365,15 +369,28 @@ const ThreadScrollToBottom: FC = () => {
 };
 
 const ThreadWelcome: FC = () => {
+  const { lang } = useLanguage();
+  const { activeSessionId, sessions, characters } = useTouhouUi();
+
+  const welcomeCharacterName = useMemo(() => {
+    if (!activeSessionId) return "";
+    const session = sessions.find((s) => s.id === activeSessionId);
+    if (!session) return "";
+    return characters[session.characterId]?.name ?? session.characterId ?? "";
+  }, [activeSessionId, sessions, characters]);
   return (
     <div className="aui-thread-welcome-root mx-auto my-auto flex w-full max-w-(--thread-max-width) grow flex-col">
-      <div className="aui-thread-welcome-center flex w-full grow flex-col items-center justify-center">
-        <div className="aui-thread-welcome-message flex size-full flex-col justify-center px-4">
-          <h1 className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in fill-mode-both font-semibold text-2xl duration-200">
-            Hello there!
+      <div className="aui-thread-welcome-center flex w-full grow flex-col items-center justify-center px-4">
+        <div className="aui-thread-welcome-message flex w-full max-w-2xl flex-col justify-center rounded-[28px] border border-border/60 bg-background/55 px-6 py-7 shadow-sm backdrop-blur">
+          <div className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in fill-mode-both flex items-center gap-2 text-muted-foreground text-sm duration-200">
+            <SparklesIcon className="size-4" />
+            <span>{lang === "ja" ? "\u30ad\u30e3\u30e9\u30af\u30bf\u30fc\u30c1\u30e3\u30c3\u30c8" : "Character chat"}</span>
+          </div>
+          <h1 className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in fill-mode-both mt-3 font-semibold text-2xl duration-200">
+            {lang === "ja" ? "\u4f1a\u8a71\u3092\u59cb\u3081\u308b" : "Start a conversation"}
           </h1>
-          <p className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in fill-mode-both text-muted-foreground text-xl delay-75 duration-200">
-            How can I help you today?
+          <p className="aui-thread-welcome-message-inner fade-in slide-in-from-bottom-1 animate-in fill-mode-both mt-2 text-muted-foreground text-base delay-75 duration-200">
+            {lang === "ja" ? `\u30e1\u30c3\u30bb\u30fc\u30b8\u3092\u9001\u308b\u3068\u3001\u300c${welcomeCharacterName || "\u30ad\u30e3\u30e9\u30af\u30bf\u30fc"}\u300d\u304c\u8fd4\u7b54\u3057\u307e\u3059\u3002` : `Send the first message and ${welcomeCharacterName || "the character"} will reply.`}
           </p>
         </div>
       </div>
@@ -415,16 +432,17 @@ const ThreadSuggestionItem: FC = () => {
 };
 
 const Composer: FC = () => {
+  const { lang } = useLanguage();
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
-      <ComposerPrimitive.AttachmentDropzone className="aui-composer-attachment-dropzone flex w-full flex-col rounded-2xl border border-input bg-background px-1 pt-2 outline-none transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
+      <ComposerPrimitive.AttachmentDropzone className="aui-composer-attachment-dropzone flex w-full flex-col rounded-[28px] border border-input/80 bg-background/92 px-1 pt-2 shadow-sm outline-none backdrop-blur transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
         <ComposerAttachments />
         <ComposerPrimitive.Input
-          placeholder="Send a message..."
+          placeholder={lang === "ja" ? "\u30e1\u30c3\u30bb\u30fc\u30b8\u3092\u9001\u4fe1" : "Send a message"}
           className="aui-composer-input mb-1 max-h-32 min-h-14 w-full resize-none bg-transparent px-4 pt-2 pb-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-0"
           rows={1}
           autoFocus
-          aria-label="Message input"
+          aria-label={lang === "ja" ? "\u30e1\u30c3\u30bb\u30fc\u30b8\u5165\u529b" : "Message input"}
         />
         <ComposerAction />
       </ComposerPrimitive.AttachmentDropzone>
@@ -434,8 +452,8 @@ const Composer: FC = () => {
 
 const ComposerAction: FC = () => {
   return (
-    <div className="aui-composer-action-wrapper relative mx-2 mb-2 flex items-center justify-between">
-      <div className="flex items-center gap-1">
+    <div className="aui-composer-action-wrapper relative mx-2 mb-2 flex items-center justify-between gap-3 border-t border-border/60 px-1 pt-2">
+      <div className="flex items-center gap-1.5">
         <ComposerAddAttachment />
         <VoiceInputButton />
       </div>
@@ -447,7 +465,7 @@ const ComposerAction: FC = () => {
             type="submit"
             variant="default"
             size="icon"
-            className="aui-composer-send size-8 rounded-full"
+            className="aui-composer-send size-9 rounded-full shadow-sm"
             aria-label="Send message"
           >
             <ArrowUpIcon className="aui-composer-send-icon size-4" />
@@ -460,7 +478,7 @@ const ComposerAction: FC = () => {
             type="button"
             variant="default"
             size="icon"
-            className="aui-composer-cancel size-8 rounded-full"
+            className="aui-composer-cancel size-9 rounded-full shadow-sm"
             aria-label="Stop generating"
           >
             <SquareIcon className="aui-composer-cancel-icon size-3 fill-current" />
@@ -623,13 +641,34 @@ const MessageError: FC = () => {
 
 const AssistantAvatar: FC = () => {
   const { activeSessionId, sessions, characters } = useTouhouUi();
+  const custom = useMessage((s) => s.metadata?.custom) as Record<string, unknown> | null;
+
+  const speakerCharacterId = useMemo(() => {
+    const talkSpeakerId =
+      typeof custom?._talkSpeakerId === "string" && custom._talkSpeakerId.trim()
+        ? custom._talkSpeakerId.trim()
+        : null;
+    if (talkSpeakerId) return talkSpeakerId;
+    const speaker =
+      custom?.speaker && typeof custom.speaker === "object" && !Array.isArray(custom.speaker)
+        ? (custom.speaker as Record<string, unknown>)
+        : null;
+    if (typeof speaker?.character_id === "string" && speaker.character_id.trim()) {
+      return speaker.character_id.trim();
+    }
+    if (typeof custom?.character_id === "string" && custom.character_id.trim()) {
+      return custom.character_id.trim();
+    }
+    return null;
+  }, [custom]);
 
   const assistantCharacter = useMemo(() => {
+    if (speakerCharacterId) return characters[speakerCharacterId] ?? null;
     if (!activeSessionId) return null;
     const session = sessions.find((s) => s.id === activeSessionId);
     if (!session) return null;
     return characters[session.characterId] ?? null;
-  }, [activeSessionId, sessions, characters]);
+  }, [speakerCharacterId, activeSessionId, sessions, characters]);
 
   const name = assistantCharacter?.name ?? "assistant";
 
@@ -642,17 +681,34 @@ const AssistantAvatar: FC = () => {
 };
 
 const AssistantMessage: FC = () => {
-  const { activeSessionId, sessions } = useTouhouUi();
+  const { activeSessionId, sessions, characters } = useTouhouUi();
   const desktopTtsState = useDesktopTtsStateValue();
   const messageId = useMessage((s) => s.id) as string;
   const content = useMessage((s) => s.content) as unknown;
   const custom = useMessage((s) => s.metadata?.custom) as Record<string, unknown> | null;
 
   const assistantCharacterId = useMemo(() => {
+    const talkSpeakerId =
+      typeof custom?._talkSpeakerId === "string" && custom._talkSpeakerId.trim()
+        ? custom._talkSpeakerId.trim()
+        : null;
+    if (talkSpeakerId) return talkSpeakerId;
+    const speaker =
+      custom?.speaker && typeof custom.speaker === "object" && !Array.isArray(custom.speaker)
+        ? (custom.speaker as Record<string, unknown>)
+        : null;
+    if (typeof speaker?.character_id === "string" && speaker.character_id.trim()) {
+      return speaker.character_id.trim();
+    }
     if (!activeSessionId) return null;
     const session = sessions.find((s) => s.id === activeSessionId);
     return session?.characterId ?? null;
-  }, [activeSessionId, sessions]);
+  }, [custom, activeSessionId, sessions]);
+
+  const speakerLabel = useMemo(() => {
+    if (!assistantCharacterId) return "";
+    return characters[assistantCharacterId]?.name ?? assistantCharacterId;
+  }, [assistantCharacterId, characters]);
 
   const ttsCharacterId = useMemo(() => {
     if (!assistantCharacterId) return null;
@@ -684,6 +740,11 @@ const AssistantMessage: FC = () => {
         {/* ===== キャラクターアイコン（左上・非重なり） ===== */}
         <div className="mb-1">
           <AssistantAvatar />
+          {speakerLabel ? (
+            <div className="mt-2 ml-1 text-xs font-medium tracking-wide text-muted-foreground">
+              {speakerLabel}
+            </div>
+          ) : null}
         </div>
 
         {/* ===== バブル ===== */}

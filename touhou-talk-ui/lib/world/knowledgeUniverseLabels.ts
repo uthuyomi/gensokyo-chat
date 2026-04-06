@@ -55,13 +55,13 @@ export function knowledgeNodeTitle(node: KnowledgeUniverseNode) {
   if (node.source_kind === "chat_context") {
     if (contextType === "character_voice" && character) return `${character}の話し方`;
     if (contextType === "character_location_story" && character && location) return `${character}と${location}`;
-    if (contextType === "location_story" && location) return `${location}の空気`;
-    if (contextType === "user_participation") return "参加履歴の文脈";
+    if (contextType === "location_story" && location) return `${location}の物語`;
+    if (contextType === "user_participation") return "ユーザー参加文脈";
   }
 
   if (node.source_kind === "canon_claim" && character) return `${character}の正史設定`;
   if (node.source_kind === "canon_claim" && location) return `${location}の正史設定`;
-  if (node.source_kind === "wiki_page") return `${node.title}の項目`;
+  if (node.source_kind === "wiki_page") return `${node.title}のWiki項目`;
   if (node.source_kind === "chronicle_entry") return `${node.title}の記録`;
 
   return node.title || prettifyId(node.source_ref_id);
@@ -76,27 +76,28 @@ export function knowledgeNodeSummary(node: KnowledgeUniverseNode) {
 
   if (node.source_kind === "chat_context") {
     if (contextType === "character_voice" && character) {
-      return `${character}が会話するときの口調、温度感、立ち位置をまとめた会話文脈ノードだよ。`;
+      return `${character}がどう話すか、どんな言い回しや空気感を持つかをまとめた会話文脈です。`;
     }
     if (contextType === "character_location_story" && character && location) {
-      return `${character}が${location}にいる時の空気感や振る舞いを表す会話文脈ノードだね。`;
+      return `${character}と${location}の結び付きや、その場にまつわる物語の流れを整理した会話文脈です。`;
     }
     if (contextType === "location_story" && location) {
-      return `${location}という場に漂う雰囲気や、そこで起こりやすい物語の流れをまとめたノードさ。`;
+      return `${location}で起こる出来事や、そこで語られやすい背景情報をまとめた会話文脈です。`;
     }
+    return "会話生成に使うための文脈データです。";
   }
 
   if (node.source_kind === "canon_claim") {
-    return `幻想郷の正史設定を束ねた知識ノードだよ。参照IDは ${node.source_ref_id}。`;
+    return `幻想郷の正史設定を示す項目です。参照用IDは ${node.source_ref_id} です。`;
   }
   if (node.source_kind === "lore_entry") {
-    return "世界設定、制度、習俗の要点をまとめた lore ノードだね。";
+    return "世界観、背景、設定の要点を整理した lore ノードです。";
   }
   if (node.source_kind === "wiki_page") {
-    return "Wiki 表示用に再編集された項目だよ。原典や設定断片への入口になる。";
+    return "Wiki表示向けに整理された項目です。要点や関連語への入口として使えます。";
   }
   if (node.source_kind === "chronicle_entry") {
-    return "年代記として編纂された記録ノードだよ。出来事の流れや余韻を読むための層さ。";
+    return "年代記として整理された記録です。出来事の時系列を追う入口になります。";
   }
 
   return node.summary;

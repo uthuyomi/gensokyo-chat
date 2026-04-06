@@ -18,11 +18,13 @@ import {
   type CompleteAttachment,
   type ExternalStoreAdapter,
 } from "@assistant-ui/react";
+import { BotIcon, FastForwardIcon, InfoIcon, UserIcon, UsersIcon } from "lucide-react";
 
 import { Thread } from "@/components/assistant-ui/thread";
 import { ThreadSearch } from "@/components/assistant-ui/thread-search";
 import { TouhouSidebar } from "@/components/assistant-ui/touhou-sidebar";
 import { TouhouUiProvider } from "@/components/assistant-ui/touhou-ui-context";
+import { useLanguage } from "@/components/i18n/LanguageProvider";
 import {
   SidebarInset,
   SidebarProvider,
@@ -36,6 +38,8 @@ import { getGroupsByLocation, canEnableGroup, GroupDef } from "@/data/group";
 import { getDefaultChatMode } from "@/lib/touhou-settings";
 import { buildRunJsonlFromMessages, parseArtifactText } from "@/lib/artifact/artifact-io";
 import DesktopLiveAvatar from "@/components/desktop/DesktopLiveAvatar";
+import type { RoomParticipant } from "@/lib/rooms/participants";
+import { getAiParticipants, getPrimaryAiCharacterId } from "@/lib/rooms/participants";
 
 import {
   extractTextFromThreadMessageContent,
@@ -59,6 +63,8 @@ type SessionSummary = {
   layer: string | null;
   location: string | null;
   chatMode: "partner" | "roleplay" | "coach";
+  participants?: RoomParticipant[];
+  meta?: Record<string, unknown> | null;
 };
 
 type PanelGroupContext = {
@@ -115,6 +121,38 @@ type VscodeState =
   | "applied"
   | "error";
 
+function inferSpeakerCharacterId(meta: unknown, fallbackCharacterId: string | null) {
+  const source =
+    meta && typeof meta === "object" && !Array.isArray(meta)
+      ? (meta as Record<string, unknown>)
+      : null;
+  const speaker =
+    source?.speaker && typeof source.speaker === "object" && !Array.isArray(source.speaker)
+      ? (source.speaker as Record<string, unknown>)
+      : null;
+  const speakerCharacterId =
+    typeof speaker?.character_id === "string" && speaker.character_id.trim()
+      ? speaker.character_id.trim()
+      : typeof source?.character_id === "string" && source.character_id.trim()
+        ? source.character_id.trim()
+        : null;
+  return speakerCharacterId ?? fallbackCharacterId;
+}
+
+function normalizeFetchedMessage(m: any, fallbackCharacterId: string | null): Message {
+  return {
+    id: String(m.id),
+    role: m.role === "user" ? "user" : "ai",
+    content: String(m.content ?? ""),
+    speakerId:
+      typeof m.speaker_id === "string" && m.speaker_id
+        ? m.speaker_id
+        : inferSpeakerCharacterId(m.meta ?? null, fallbackCharacterId) ?? undefined,
+    attachments: [],
+    meta: (m.meta ?? null) as Record<string, unknown> | null,
+  };
+}
+
 /* =========================
    Component
 ========================= */
@@ -136,6 +174,35 @@ function AutoCloseSidebarOnRequest(props: { requestId: number }) {
 }
 
 export default function ChatClient() {
+  const { lang, t } = useLanguage();
+  const chatUi = useMemo(() => ({
+    room: lang === "ja" ? "???" : "Room",
+    chooseCharacter: lang === "ja" ? "???????????????" : "Choose a character",
+    sessionShow: lang === "ja" ? "?????ID???" : "Show session ID",
+    sessionHide: lang === "ja" ? "?????ID????" : "Hide session ID",
+    groupRosterShow: lang === "ja" ? "?????????" : "Show participants",
+    groupRosterHide: lang === "ja" ? "??????????" : "Hide participants",
+    participants: lang === "ja" ? "??????" : "Participants",
+    cast: lang === "ja" ? "???" : "Cast",
+    lead: lang === "ja" ? "??" : "Lead",
+    topic: lang === "ja" ? "??" : "Topic",
+    recentTurns: lang === "ja" ? "??????" : "Recent turns",
+    nextCandidate: lang === "ja" ? "???" : "Next",
+    continueTitle: lang === "ja" ? "AI room ?????????" : "Let the AI room continue",
+    continue: lang === "ja" ? "???????" : "Continue",
+    autoRunTitle: lang === "ja" ? "AI room ?????????????" : "Auto-run the AI room",
+    autoRunOn: lang === "ja" ? "???????" : "Auto-running",
+    autoRunOff: lang === "ja" ? "???????" : "Auto-run",
+    resizeAvatarPanel: lang === "ja" ? "???????????????" : "Resize avatar panel",
+    resizeByDrag: lang === "ja" ? "??????????????????????????????" : "Drag to resize. Double-click to reset.",
+    character: lang === "ja" ? "??????" : "Character",
+    avatarArea: lang === "ja" ? "3:4 ?????????? VRM ??????" : "VRM display area with a fixed 3:4 portrait ratio",
+    dragMove: lang === "ja" ? "????????????????????????????????" : "Drag to move. Double-click to reset size.",
+    avatar: lang === "ja" ? "????" : "Avatar",
+    hideAvatar: lang === "ja" ? "????????????" : "Hide avatar",
+    dragResize: lang === "ja" ? "???????????????" : "Drag to resize",
+    empty: lang === "ja" ? "??????????????????????????" : "Choose a character from the left sidebar.",
+  }), [lang]);
   const searchParams = useSearchParams();
   const currentLayer = searchParams.get("layer");
   const currentLocationId = searchParams.get("loc");
@@ -161,6 +228,46 @@ export default function ChatClient() {
     if (!activeSessionId) return null;
     return sessions.find((s) => s.id === activeSessionId) ?? null;
   }, [sessions, activeSessionId]);
+
+  const activeParticipants = useMemo(
+    () => activeSession?.participants ?? [],
+    [activeSession],
+  );
+
+  const activeAiCharacterIds = useMemo(() => {
+    const ids = activeParticipants
+      .filter((participant): participant is RoomParticipant => !!participant)
+      .flatMap((participant) =>
+        participant.kind === "ai_character" ? [participant.characterId] : [],
+      );
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    if (unique.length > 0) return unique;
+    return activeCharacterId ? [activeCharacterId] : [];
+  }, [activeParticipants, activeCharacterId]);
+
+  const activeSceneState = useMemo(() => {
+    const meta =
+      activeSession?.meta && typeof activeSession.meta === "object" && !Array.isArray(activeSession.meta)
+        ? (activeSession.meta as Record<string, unknown>)
+        : null;
+    const scene =
+      meta?.scene_state && typeof meta.scene_state === "object" && !Array.isArray(meta.scene_state)
+        ? (meta.scene_state as Record<string, unknown>)
+        : null;
+    return scene;
+  }, [activeSession]);
+
+  const activeHumanParticipantCount = useMemo(
+    () => activeParticipants.filter((participant) => participant.kind === "human").length,
+    [activeParticipants],
+  );
+
+  const needsRoomPolling = useMemo(() => {
+    if (!activeSession) return false;
+    if (activeSession.mode === "group") return true;
+    if (activeHumanParticipantCount > 1) return true;
+    return false;
+  }, [activeSession, activeHumanParticipantCount]);
 
   const [relationshipHud, setRelationshipHud] = useState<{
     trust: number;
@@ -225,6 +332,8 @@ export default function ChatClient() {
   const [desktopAvatarPopoutActive, setDesktopAvatarPopoutActive] = useState(false);
 
   const [artifactBusy, setArtifactBusy] = useState(false);
+  const [showSessionMeta, setShowSessionMeta] = useState(false);
+  const [showGroupRoster, setShowGroupRoster] = useState(false);
 
   const [messagesBySession, setMessagesBySession] = useState<
     Record<string, Message[]>
@@ -265,6 +374,24 @@ export default function ChatClient() {
   });
 
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
+
+  useEffect(() => {
+    setShowSessionMeta(false);
+    setShowGroupRoster(false);
+  }, [activeSessionId]);
+
+  const [isCreateThreadDialogOpen, setIsCreateThreadDialogOpen] = useState(false);
+  const [sceneAutoRun, setSceneAutoRun] = useState(false);
+  const [recentCharacterIds, setRecentCharacterIds] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const raw = window.localStorage.getItem("touhou.chat.recentCharacters");
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+    } catch {
+      return [];
+    }
+  });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -599,6 +726,21 @@ export default function ChatClient() {
     return CHARACTERS[activeCharacterId] ?? null;
   }, [activeCharacterId]);
 
+  useEffect(() => {
+    const characterId = String(activeCharacterId ?? "").trim();
+    if (!characterId) return;
+
+    setRecentCharacterIds((prev) => {
+      const next = [characterId, ...prev.filter((id) => id !== characterId)].slice(0, 8);
+      try {
+        window.localStorage.setItem("touhou.chat.recentCharacters", JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, [activeCharacterId]);
+
   const [resolvedChatBackground, setResolvedChatBackground] = useState<string | null>(null);
 
   useEffect(() => {
@@ -687,21 +829,25 @@ export default function ChatClient() {
     };
   }, [panelGroupContext]);
 
+  const refreshSessions = useCallback(async () => {
+    const res = await fetch("/api/session", { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { sessions?: SessionSummary[] };
+    const nextSessions = data.sessions ?? [];
+    setSessions(nextSessions);
+    setSessionsLoaded(true);
+    return nextSessions;
+  }, []);
+
   /* =========================
      Initial session list
   ========================= */
 
   useEffect(() => {
     (async () => {
-      const res = await fetch("/api/session", {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as { sessions?: SessionSummary[] };
-      setSessions(data.sessions ?? []);
-      setSessionsLoaded(true); // セッション一覧の取得完了
+      await refreshSessions();
     })();
-  }, []);
+  }, [refreshSessions]);
 
   /* =========================
      Character select
@@ -758,39 +904,83 @@ export default function ChatClient() {
     [sessions, mode, currentLayer, currentLocationId],
   );
 
-  const createSession = useCallback(async () => {
-    if (!activeCharacterId) return;
+  const createSessionForCharacters = useCallback(async (
+    characterIds: string[],
+    invitedHumans?: Array<{ userId?: string | null; displayName?: string | null; email?: string | null }>,
+  ) => {
+    const normalizedIds = Array.from(
+      new Set(
+        characterIds
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    );
+    if (normalizedIds.length === 0) return;
 
+    const primaryCharacterId = normalizedIds[0];
+    const chatMode = getDefaultChatMode();
+    const sessionMode: "single" | "group" = normalizedIds.length > 1 ? "group" : mode;
     const res = await fetch("/api/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        characterId: activeCharacterId,
-        mode,
+        characterId: primaryCharacterId,
+        participantCharacterIds: normalizedIds,
+        invitedHumans: Array.isArray(invitedHumans) ? invitedHumans : [],
+        mode: sessionMode,
         layer: currentLayer,
         location: currentLocationId,
-        chatMode: getDefaultChatMode(),
+        chatMode,
       }),
     });
 
     if (!res.ok) return;
     const data = (await res.json()) as CreateSessionResponse;
 
+    const participants: RoomParticipant[] = normalizedIds.map((id) => ({
+      id: `ai:${id}`,
+      kind: "ai_character",
+      characterId: id,
+      displayName: CHARACTERS[id]?.name ?? id,
+      title: CHARACTERS[id]?.title ?? null,
+    }));
+
     const newSession: SessionSummary = {
       id: data.sessionId,
-      title: "新しい会話",
-      characterId: activeCharacterId,
-      mode,
+      title: normalizedIds.length > 1 ? "新しいルーム" : "新しい会話",
+      characterId: primaryCharacterId,
+      mode: sessionMode,
       layer: currentLayer,
       location: currentLocationId,
-      chatMode: getDefaultChatMode(),
+      chatMode,
+      participants,
+      meta: {
+        room_kind: invitedHumans?.length ? "mixed" : normalizedIds.length > 1 ? "group_ai" : "single",
+        participant_character_ids: normalizedIds,
+      },
     };
 
     setSessions((prev) => [newSession, ...prev]);
     setActiveSessionId(newSession.id);
+    setActiveCharacterId(primaryCharacterId);
     setMessagesBySession((prev) => ({ ...prev, [newSession.id]: [] }));
     setHasSelectedOnce(true);
-  }, [activeCharacterId, mode, currentLayer, currentLocationId]);
+    setIsCreateThreadDialogOpen(false);
+    if (isMobile) setSidebarCloseRequestId((v) => v + 1);
+  }, [currentLayer, currentLocationId, isMobile, mode]);
+
+  const createSessionForCharacter = useCallback(async (characterId: string) => {
+    await createSessionForCharacters([characterId]);
+  }, [createSessionForCharacters]);
+
+  const createSession = useCallback(async () => {
+    if (!activeCharacterId) {
+      setIsCreateThreadDialogOpen(true);
+      return;
+    }
+    await createSessionForCharacter(activeCharacterId);
+  }, [activeCharacterId, createSessionForCharacter]);
 
   /* =========================
      Artifact import / export
@@ -1028,6 +1218,22 @@ export default function ChatClient() {
      Messages restore
   ========================= */
 
+  const refreshSessionMessages = useCallback(async (sessionId: string) => {
+    const session = sessions.find((s) => s.id === sessionId) ?? null;
+    const fallbackCharacterId = session?.characterId ?? null;
+    const res = await fetch(`/api/session/${sessionId}/messages`, { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const normalized =
+      (Array.isArray(data.messages) ? data.messages : []).map((m: any) =>
+        normalizeFetchedMessage(m, fallbackCharacterId),
+      ) ?? [];
+    setMessagesBySession((prev) => ({
+      ...prev,
+      [sessionId]: normalized,
+    }));
+  }, [sessions]);
+
   useEffect(() => {
     if (!activeSessionId) return;
     if (!sessions.some((s) => s.id === activeSessionId)) return;
@@ -1035,26 +1241,49 @@ export default function ChatClient() {
       return;
 
     (async () => {
-      const res = await fetch(`/api/session/${activeSessionId}/messages`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setMessagesBySession((prev) => ({
-        ...prev,
-        [activeSessionId]:
-          (Array.isArray(data.messages) ? data.messages : []).map((m: any) => ({
-            id: String(m.id),
-            role: m.role === "user" ? "user" : "ai",
-            content: String(m.content ?? ""),
-            speakerId:
-              typeof m.speaker_id === "string" && m.speaker_id
-                ? m.speaker_id
-                : undefined,
-            attachments: [],
-            meta: (m.meta ?? null) as Record<string, unknown> | null,
-          })) ?? [],
-      }));
+      await refreshSessionMessages(activeSessionId);
     })();
-  }, [activeSessionId, sessions, messagesBySession]);
+  }, [activeSessionId, sessions, messagesBySession, refreshSessionMessages]);
+
+  useEffect(() => {
+    if (!sessionsLoaded) return;
+
+    const tick = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      await refreshSessions();
+      if (
+        activeSessionId &&
+        needsRoomPolling &&
+        !(isRunningBySession[activeSessionId] ?? false)
+      ) {
+        await refreshSessionMessages(activeSessionId);
+      }
+    };
+
+    const intervalMs = needsRoomPolling ? 12000 : 30000;
+    const id = window.setInterval(() => {
+      void tick();
+    }, intervalMs);
+
+    const onFocus = () => {
+      void tick();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [
+    sessionsLoaded,
+    refreshSessions,
+    refreshSessionMessages,
+    activeSessionId,
+    isRunningBySession,
+    needsRoomPolling,
+  ]);
 
   /* =========================
      Message send
@@ -1196,6 +1425,88 @@ export default function ChatClient() {
           form.append("files", file);
         }
 
+        if (activeSession?.mode === "group") {
+          const res = await fetch(endpoint, {
+            method: "POST",
+            body: form,
+          });
+          if (!res.ok) {
+            let detail = `HTTP ${res.status}`;
+            try {
+              const body = (await res.json().catch(() => null)) as
+                | { error?: unknown; detail?: unknown }
+                | null;
+              const msg = String(body?.error ?? body?.detail ?? "").trim();
+              if (msg) detail = msg;
+            } catch {
+              // ignore
+            }
+            appendMessage({
+              id: crypto.randomUUID(),
+              role: "ai",
+              content: `送信失敗: ${detail}`,
+              speakerId: activeCharacterId,
+              attachments: [],
+              meta: { source: "chat_group_request" },
+            });
+            return;
+          }
+
+          const data = (await res.json()) as {
+            role?: "ai";
+            content?: string;
+            messages?: Array<{ id?: string; role?: "ai"; content?: string; speaker_id?: string | null; meta?: Record<string, unknown> | null }>;
+            meta?: Record<string, unknown> | null;
+          };
+          const turns = Array.isArray(data.messages) ? data.messages : [];
+          const appended = turns.length > 0
+            ? turns.map((turn) => ({
+                id: typeof turn.id === "string" && turn.id ? turn.id : crypto.randomUUID(),
+                role: "ai" as const,
+                content: String(turn.content ?? ""),
+                speakerId:
+                  typeof turn.speaker_id === "string" && turn.speaker_id
+                    ? turn.speaker_id
+                    : inferSpeakerCharacterId(turn.meta ?? null, activeCharacterId) ?? undefined,
+                attachments: [],
+                meta: (turn.meta ?? null) as Record<string, unknown> | null,
+              }))
+            : [{
+                id: crypto.randomUUID(),
+                role: "ai" as const,
+                content: String(data.content ?? "返答を受け取れなかった"),
+                speakerId: inferSpeakerCharacterId(data.meta ?? null, activeCharacterId) ?? undefined,
+                attachments: [],
+                meta: (data.meta ?? null) as Record<string, unknown> | null,
+              }];
+
+          setMessagesBySession((prev) => ({
+            ...prev,
+            [activeSessionId]: [...(prev[activeSessionId] ?? []), ...appended],
+          }));
+
+          const sceneState =
+            data.meta && typeof data.meta === "object" && !Array.isArray(data.meta)
+              ? (data.meta as Record<string, unknown>).scene_state
+              : null;
+          if (sceneState && typeof sceneState === "object" && !Array.isArray(sceneState)) {
+            setSessions((prev) =>
+              prev.map((session) =>
+                session.id === activeSessionId
+                  ? {
+                      ...session,
+                      meta: {
+                        ...(session.meta ?? {}),
+                        scene_state: sceneState as Record<string, unknown>,
+                      },
+                    }
+                  : session,
+              ),
+            );
+          }
+          return;
+        }
+
         // AI placeholder (stream target)
         aiId = crypto.randomUUID();
         appendMessage({
@@ -1224,6 +1535,7 @@ export default function ChatClient() {
         };
 
         const finalize = (finalText: string, meta: unknown) => {
+          const speakerId = inferSpeakerCharacterId(meta, activeCharacterId);
           setMessagesBySession((prev) => {
             const list = prev[activeSessionId] ?? [];
             return {
@@ -1233,6 +1545,7 @@ export default function ChatClient() {
                   ? {
                       ...m,
                       content: finalText,
+                      speakerId: speakerId ?? undefined,
                       meta:
                         meta && typeof meta === "object" && !Array.isArray(meta)
                           ? (meta as Record<string, unknown>)
@@ -1363,9 +1676,106 @@ export default function ChatClient() {
       activeSessionId,
       activeCharacterId,
       appendMessage,
+      activeSession?.mode,
       setMessagesBySession,
+      setSessions,
     ],
   );
+
+  const handleContinueScene = useCallback(async () => {
+    if (!activeSessionId || !activeCharacterId) return;
+
+    setIsRunningBySession((prev) => ({
+      ...prev,
+      [activeSessionId]: true,
+    }));
+
+    try {
+      const form = new FormData();
+      form.append("characterId", activeCharacterId);
+      form.append("text", "そのまま続けて");
+      form.append("sceneMode", "continue");
+      form.append("sceneTurnCount", "2");
+
+      const res = await fetch(`/api/session/${activeSessionId}/message`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "");
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
+
+      const data = (await res.json()) as {
+        messages?: Array<{ id?: string; role?: "ai"; content?: string; speaker_id?: string | null; meta?: Record<string, unknown> | null }>;
+        meta?: Record<string, unknown> | null;
+      };
+      const turns = Array.isArray(data.messages) ? data.messages : [];
+      if (turns.length === 0) return;
+
+      setMessagesBySession((prev) => {
+        const current = prev[activeSessionId] ?? [];
+        const appended = turns.map((turn, index) => ({
+          id: typeof turn.id === "string" && turn.id ? turn.id : crypto.randomUUID(),
+          role: "ai" as const,
+          content: String(turn.content ?? ""),
+          speakerId:
+            typeof turn.speaker_id === "string" && turn.speaker_id
+              ? turn.speaker_id
+              : inferSpeakerCharacterId(turn.meta ?? null, activeCharacterId) ?? undefined,
+          attachments: [],
+          meta: (turn.meta ?? null) as Record<string, unknown> | null,
+        }));
+        return {
+          ...prev,
+          [activeSessionId]: [...current, ...appended],
+        };
+      });
+      const sceneState =
+        data.meta && typeof data.meta === "object" && !Array.isArray(data.meta)
+          ? (data.meta as Record<string, unknown>).scene_state
+          : null;
+      if (sceneState && typeof sceneState === "object" && !Array.isArray(sceneState)) {
+        setSessions((prev) =>
+          prev.map((session) =>
+            session.id === activeSessionId
+              ? {
+                  ...session,
+                  meta: {
+                    ...(session.meta ?? {}),
+                    scene_state: sceneState as Record<string, unknown>,
+                  },
+                }
+              : session,
+          ),
+        );
+      }
+    } catch (error) {
+      console.error("[touhou] continue scene failed:", error);
+    } finally {
+      setIsRunningBySession((prev) => ({
+        ...prev,
+        [activeSessionId]: false,
+      }));
+    }
+  }, [activeSessionId, activeCharacterId]);
+
+  useEffect(() => {
+    if (activeSession?.mode !== "group") {
+      setSceneAutoRun(false);
+    }
+  }, [activeSession?.id, activeSession?.mode]);
+
+  useEffect(() => {
+    if (!sceneAutoRun) return;
+    if (!activeSessionId || activeSession?.mode !== "group") return;
+    if (isRunningBySession[activeSessionId] ?? false) return;
+
+    const timer = window.setTimeout(() => {
+      void handleContinueScene();
+    }, 1400);
+    return () => window.clearTimeout(timer);
+  }, [sceneAutoRun, activeSessionId, activeSession?.mode, isRunningBySession, handleContinueScene]);
 
   /* =========================
      Render
@@ -1412,7 +1822,7 @@ export default function ChatClient() {
           })),
           archivedThreads: [],
           onSwitchToNewThread: async () => {
-            await createSession();
+            setIsCreateThreadDialogOpen(true);
           },
           onSwitchToThread: async (threadId: string) => {
             selectSession(threadId);
@@ -1439,6 +1849,7 @@ export default function ChatClient() {
       activeSessionId,
       attachmentAdapter,
       createSession,
+      createSessionForCharacter,
       handleDeleteSession,
       handleRenameSession,
       handleSendTalk,
@@ -1457,7 +1868,6 @@ export default function ChatClient() {
   useEffect(() => {
     if (!isElectron) return;
     if (!activeSessionId) return;
-    if (!activeCharacterId) return;
 
     const isRunning = isRunningBySession[activeSessionId] ?? false;
     const wasRunning = popoutTtsPrevRunningRef.current;
@@ -1469,11 +1879,16 @@ export default function ChatClient() {
     const id = String(lastAi?.id ?? "").trim() || null;
     const text = String(lastAi?.content ?? "").trim();
     const readingText = String((lastAi?.meta as any)?.tts?.reading_text ?? "").trim() || null;
+    const speakerCharacterId =
+      typeof lastAi?.speakerId === "string" && lastAi.speakerId.trim()
+        ? lastAi.speakerId.trim()
+        : activeCharacterId;
+    if (!speakerCharacterId) return;
     if (!text) return;
     if (id && popoutTtsLastIdRef.current === id) return;
     popoutTtsLastIdRef.current = id;
 
-    const detail = { characterId: activeCharacterId, messageId: id, text, readingText };
+    const detail = { characterId: speakerCharacterId, messageId: id, text, readingText };
 
     try {
       window.dispatchEvent(new CustomEvent("touhou-desktop:tts-speak", { detail }));
@@ -1594,29 +2009,44 @@ export default function ChatClient() {
       <TouhouUiProvider
         value={{
           activeSessionId,
-          sessions: sessions.map((s) => ({ id: s.id, characterId: s.characterId })),
+          sessions: sessions.map((s) => ({
+            id: s.id,
+            characterId: s.characterId,
+            mode: s.mode,
+            participants: s.participants,
+            meta: s.meta,
+          })),
           characters: CHARACTERS,
+          visibleCharacters,
+          openCreateThreadDialog: () => setIsCreateThreadDialogOpen(true),
+          createThreadForCharacter: createSessionForCharacter,
+          createThreadForCharacters: createSessionForCharacters,
         }}
       >
         <SidebarProvider
           style={
             {
-              "--sidebar-width": charactersCollapsed ? "19rem" : "32rem",
+              "--sidebar-width": charactersCollapsed ? "17rem" : "26rem",
             } as React.CSSProperties
           }
         >
           <AutoCloseSidebarOnRequest requestId={sidebarCloseRequestId} />
           <div className="flex h-full w-full min-h-0 overflow-hidden bg-background text-foreground transition-colors duration-300">
             <TouhouSidebar
-              visibleCharacters={visibleCharacters}
-              activeCharacterId={activeCharacterId}
-              onSelectCharacter={selectCharacter}
+                variant="floating"
+                className="z-20"
+                visibleCharacters={visibleCharacters}
+                activeCharacterId={activeCharacterId}
+                onSelectCharacter={selectCharacter}
               activeSessionId={activeSessionId}
               onImportArtifactFile={handleImportArtifactFile}
               onExportActiveSession={handleExportActiveSession}
               artifactBusy={artifactBusy}
               charactersCollapsed={charactersCollapsed}
               onCharactersCollapsedChange={setCharactersCollapsed}
+              createThreadDialogOpen={isCreateThreadDialogOpen}
+              onCreateThreadDialogOpenChange={setIsCreateThreadDialogOpen}
+              recentCharacterIds={recentCharacterIds}
             />
 
             <SidebarInset className="relative flex min-h-0 flex-col overflow-hidden">
@@ -1632,7 +2062,7 @@ export default function ChatClient() {
               />
 
               {/* Header */}
-              <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b px-4 bg-background/70 backdrop-blur">
+              <header className="sticky top-0 z-30 flex min-h-16 shrink-0 items-center gap-2 border-b px-4 py-2 bg-background/70 backdrop-blur">
                 {activeCharacter?.color?.accent && (
                   <div
                     className={`absolute inset-0 -z-10 bg-gradient-to-br opacity-60 ${activeCharacter.color.accent}`}
@@ -1641,119 +2071,148 @@ export default function ChatClient() {
 
                 <SidebarTrigger />
                 <Separator orientation="vertical" className="mr-2 h-4" />
-                <div className="min-w-0">
-                  <div className="truncate font-gensou text-sm">
-                    {activeCharacter?.name ?? "キャラを選択"}
+                <div className="min-w-0 flex flex-1 items-center gap-3 overflow-visible">
+                  <div className="relative flex min-w-0 flex-1 items-center gap-2 overflow-visible">
+                    <div className="max-w-[16rem] truncate font-gensou text-sm">
+                      {activeSession?.mode === "group"
+                        ? activeSession?.title ?? chatUi.room
+                        : activeCharacter?.name ?? chatUi.chooseCharacter}
+                    </div>
+                    {activeSessionId ? (
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowSessionMeta((v) => !v)}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/60 bg-background/60 text-foreground/80 transition hover:bg-background/80"
+                          title={showSessionMeta ? chatUi.sessionHide : chatUi.sessionShow}
+                          aria-label={showSessionMeta ? chatUi.sessionHide : chatUi.sessionShow}
+                        >
+                          <InfoIcon className="size-3.5" />
+                        </button>
+                        {activeSession?.mode === "group" ? (
+                          <button
+                            type="button"
+                            onClick={() => setShowGroupRoster((v) => !v)}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/60 px-2.5 py-1 text-[11px] text-foreground/85 transition hover:bg-background/80"
+                            title={showGroupRoster ? chatUi.groupRosterHide : chatUi.groupRosterShow}
+                            aria-label={showGroupRoster ? chatUi.groupRosterHide : chatUi.groupRosterShow}
+                          >
+                            <UsersIcon className="size-3.5" />
+                            <span>{chatUi.cast}</span>
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {showSessionMeta && activeSessionId ? (
+                      <div className="absolute left-0 top-full z-20 mt-2 inline-flex max-w-[min(44vw,28rem)] items-center gap-2 rounded-xl border border-border/70 bg-background/90 px-3 py-1.5 text-xs text-muted-foreground shadow-sm backdrop-blur">
+                        <span className="shrink-0 font-medium text-foreground/90">{t("chat.sessionId")}</span>
+                        <span className="min-w-0 truncate font-mono">{activeSessionId}</span>
+                      </div>
+                    ) : null}
+                    {showGroupRoster && activeSession?.mode === "group" ? (
+                      <div className="absolute left-0 top-full z-20 mt-2 w-[min(26rem,calc(100vw-3rem))] rounded-2xl border border-border/70 bg-background/90 p-3 shadow-lg backdrop-blur">
+                        <div className="mb-2 text-xs font-medium text-foreground/90">{chatUi.participants}</div>
+                        <div className="space-y-2">
+                          {activeParticipants.map((participant) => {
+                            const key = participant.id;
+                            const isAi = participant.kind === "ai_character";
+                            const ch = isAi ? CHARACTERS[participant.characterId] : null;
+                            return (
+                              <div
+                                key={key}
+                                className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/45 px-3 py-2 text-xs text-foreground/85"
+                              >
+                                {isAi ? <BotIcon className="size-3.5 shrink-0" /> : <UserIcon className="size-3.5 shrink-0" />}
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate font-medium text-foreground/90">
+                                    {isAi ? (ch?.name ?? participant.displayName) : (participant.isSelf ? t("common.you") : participant.displayName)}
+                                  </div>
+                                  <div className="truncate text-[11px] text-muted-foreground">
+                                    {isAi ? chatUi.character : (lang === "ja" ? "ユーザー" : "User")}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {activeSessionId ? "セッション: " + activeSessionId : "—"}
-                  </div>
-                  {relationshipHud || worldHud ? (
-                    <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-                      {relationshipHud ? (
-                        <span>
-                          関係性: 信頼 {relationshipHud.trustLabel} / 親密 {relationshipHud.familiarityLabel}
+
+                  {activeSession?.mode === "group" && activeSceneState ? (
+                    <div className="hidden min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5 overflow-hidden md:flex">
+                      {typeof activeSceneState.initiative_character_id === "string" ? (
+                        <span className="inline-flex items-center rounded-full border border-border/50 bg-background/35 px-2 py-1 text-[11px] text-muted-foreground">
+                          {chatUi.lead}: {CHARACTERS[activeSceneState.initiative_character_id]?.name ?? activeSceneState.initiative_character_id}
                         </span>
                       ) : null}
-                      {worldHud ? (
-                        <span>
-                          世界: {worldHud.season ?? "—"} / {worldHud.weather ?? "—"} / {worldHud.timeOfDay ?? "—"}
-                          {worldHud.anomaly ? ` / 異変:${worldHud.anomaly}` : ""}
+                      {typeof activeSceneState.last_topic_hint === "string" && activeSceneState.last_topic_hint.trim() ? (
+                        <span className="inline-flex items-center rounded-full border border-border/50 bg-background/35 px-2 py-1 text-[11px] text-muted-foreground">
+                          {chatUi.topic}: {activeSceneState.last_topic_hint}
+                        </span>
+                      ) : null}
+                      {typeof activeSceneState.last_turn_count === "number" ? (
+                        <span className="inline-flex items-center rounded-full border border-border/50 bg-background/35 px-2 py-1 text-[11px] text-muted-foreground">
+                          {chatUi.recentTurns}: {activeSceneState.last_turn_count}
+                        </span>
+                      ) : null}
+                      {typeof activeSceneState.next_speaker_hint === "string" ? (
+                        <span className="inline-flex items-center rounded-full border border-border/50 bg-background/35 px-2 py-1 text-[11px] text-muted-foreground">
+                          {chatUi.nextCandidate}: {CHARACTERS[activeSceneState.next_speaker_hint]?.name ?? activeSceneState.next_speaker_hint}
                         </span>
                       ) : null}
                     </div>
                   ) : null}
                 </div>
 
-                <ThreadSearch activeSessionId={activeSessionId} />
-
-                {/* Desktop avatar controls (Electron only) */}
-                {isElectron && activeSessionId ? (
-                  <div className="ml-auto hidden items-center gap-2 lg:flex">
+                {activeSession?.mode === "group" ? (
+                  <div className="ml-2 flex items-center gap-2">
                     <button
                       type="button"
-                      className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
-                      disabled={!desktopAvatarAvailable}
-                      onClick={() => {
-                        if (desktopAvatarVisible && desktopAvatarPopoutActive) {
-                          try {
-                            window.open("/desktop/avatar?action=close", "touhou-avatar");
-                          } catch {
-                            // ignore
-                          }
-                        }
-                        setDesktopAvatarVisible((v) => !v);
-                      }}
-                      title={
-                        desktopAvatarPopoutActive
-                          ? "別ウィンドウでアバターを表示中のため、チャット内アバターは非表示になります"
-                          : desktopAvatarVisible
-                            ? "アバターを非表示にします"
-                            : "アバターを表示します"
-                      }
+                      onClick={() => void handleContinueScene()}
+                      disabled={!activeSessionId || (isRunningBySession[activeSessionId] ?? false)}
+                      className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
+                      title={chatUi.continueTitle}
                     >
-                      {desktopAvatarPopoutActive
-                        ? "別ウィンドウ表示中"
-                        : desktopAvatarVisible
-                          ? "アバターを隠す"
-                          : "アバターを表示"}
+                      <FastForwardIcon className="size-3.5" />
+                      <span>{chatUi.continue}</span>
                     </button>
-
                     <button
                       type="button"
-                      className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
-                      disabled={!desktopAvatarAvailable || !desktopAvatarVisible || desktopAvatarPopoutActive}
-                      onClick={() =>
-                        setDesktopAvatarLayout((v) => (v === "pip" ? "dock" : "pip"))
-                      }
-                      title={
-                        desktopAvatarLayout === "pip"
-                          ? "配置を「右ドック」に切り替えます（現在: 重ね表示）"
-                          : "配置を「重ね表示」に切り替えます（現在: 右ドック）"
-                      }
+                      onClick={() => setSceneAutoRun((v) => !v)}
+                      disabled={!activeSessionId}
+                      className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${
+                        sceneAutoRun
+                          ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-200"
+                          : "border-border/60 bg-background/40 text-foreground/80 hover:bg-background/60"
+                      } disabled:opacity-40`}
+                      title={chatUi.autoRunTitle}
                     >
-                      {desktopAvatarLayout === "pip" ? "右ドックにする" : "重ね表示にする"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="rounded-md border border-border/60 bg-background/40 px-2 py-1 text-xs text-foreground/80 hover:bg-background/60 disabled:opacity-40"
-                      disabled={!desktopAvatarAvailable || !activeCharacterId}
-                      onClick={() => {
-                        if (desktopAvatarPopoutActive) {
-                          try {
-                            window.open("/desktop/avatar?action=close", "touhou-avatar");
-                          } catch {
-                            // ignore
-                          }
-                          return;
-                        }
-
-                        setDesktopAvatarVisible(true);
-                        // Pop-out is currently fixed to Reimu for desktop (per UX decision).
-                        const url = `/desktop/avatar?char=reimu`;
-                        try {
-                          window.open(url, "touhou-avatar", "width=420,height=560");
-                        } catch {
-                          // ignore
-                        }
-                      }}
-                      title={
-                        desktopAvatarPopoutActive
-                          ? "別ウィンドウ表示を閉じて、チャット内表示に戻します"
-                          : "別ウィンドウでアバターを開きます"
-                      }
-                    >
-                      {desktopAvatarPopoutActive ? "チャット内に戻す" : "別ウィンドウで開く"}
+                      <UsersIcon className="size-3.5" />
+                      <span>{sceneAutoRun ? chatUi.autoRunOn : chatUi.autoRunOff}</span>
                     </button>
                   </div>
                 ) : null}
+
+                <ThreadSearch activeSessionId={activeSessionId} />
+
               </header>
 
               {/* Chat */}
               <div className="relative z-10 min-h-0 flex-1 overflow-hidden">
                 {activeSessionId ? (
                   <>
+                    {isElectron ? (
+                      <div aria-hidden className="hidden">
+                        {activeAiCharacterIds.map((characterId) => (
+                          <DesktopLiveAvatar
+                            key={`tts-driver-${characterId}`}
+                            characterId={characterId}
+                            autoSpeak={false}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
                     {isElectron &&
                     desktopAvatarVisible &&
                     desktopAvatarAvailable &&
@@ -1767,7 +2226,7 @@ export default function ChatClient() {
                           className="hidden h-full w-2 shrink-0 cursor-col-resize bg-transparent lg:block"
                           role="separator"
                           aria-orientation="vertical"
-                          aria-label="アバターパネルの幅を変更"
+                          aria-label={chatUi.resizeAvatarPanel}
                           onPointerDown={(e) => {
                             if (e.button !== 0) return;
                             dockDragRef.current = {
@@ -1782,7 +2241,7 @@ export default function ChatClient() {
                             }
                           }}
                           onDoubleClick={() => setDesktopAvatarDockWidth(360)}
-                          title="ドラッグで幅を変更（ダブルクリックでリセット）"
+                          title={chatUi.resizeByDrag}
                         >
                           <div className="mx-auto h-full w-px bg-border/60" />
                         </div>
@@ -1793,12 +2252,40 @@ export default function ChatClient() {
                           <DesktopLiveAvatar
                             characterId={activeCharacterId}
                             className="h-full w-full"
+                            autoSpeak={false}
                           />
                         </aside>
                       </div>
                     ) : (
                       <>
-                        <Thread />
+                        <div className="flex h-full min-h-0 w-full">
+                          <div className="min-w-0 flex-1 overflow-hidden">
+                            <Thread />
+                          </div>
+                          {isElectron ? (
+                            <aside className="hidden h-full w-[420px] shrink-0 border-l border-border/60 bg-background/25 backdrop-blur lg:flex xl:w-[560px] 2xl:w-[680px]">
+                              <div className="flex h-full w-full flex-col p-4">
+                                <div className="flex min-h-0 flex-1 items-center justify-center rounded-[28px] border border-border/60 bg-gradient-to-b from-background/55 to-background/20 p-4">
+                                  <div className="flex h-full w-full items-center justify-center">
+                                    <div className="flex aspect-[3/4] h-full w-full max-h-[min(78vh,960px)] max-w-[560px] flex-col items-center justify-center rounded-[28px] border border-dashed border-border/70 bg-background/35 px-6 py-8 text-center shadow-sm">
+                                      <div className="flex h-24 w-24 items-center justify-center rounded-full border border-dashed border-border/70 bg-background/45 text-3xl">
+                                        3D
+                                      </div>
+                                      <div className="mt-4">
+                                        <div className="text-sm font-medium text-foreground">
+                                          {activeCharacter?.name ?? chatUi.character}
+                                        </div>
+                                        <div className="mt-1 text-xs text-muted-foreground">
+                                          {chatUi.avatarArea}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </aside>
+                          ) : null}
+                        </div>
                         {isElectron &&
                         desktopAvatarVisible &&
                         desktopAvatarAvailable &&
@@ -1839,16 +2326,16 @@ export default function ChatClient() {
                                     }),
                                   );
                                 }}
-                                title="ドラッグで移動（ダブルクリックでサイズをリセット）"
+                                title={chatUi.dragMove}
                               >
                                 <div className="min-w-0 truncate">
-                                  {activeCharacter?.name ?? "アバター"}
+                                  {activeCharacter?.name ?? chatUi.avatar}
                                 </div>
                                 <button
                                   type="button"
                                   className="rounded-md px-1.5 py-0.5 text-foreground/70 hover:bg-background/50"
                                   onClick={() => setDesktopAvatarVisible(false)}
-                                  title="アバターを隠します"
+                                  title={chatUi.hideAvatar}
                                 >
                                   ×
                                 </button>
@@ -1857,6 +2344,7 @@ export default function ChatClient() {
                               <DesktopLiveAvatar
                                 characterId={activeCharacterId}
                                 className="h-[calc(100%-2rem)] w-full"
+                                autoSpeak={false}
                               />
 
                               <div
@@ -1876,7 +2364,7 @@ export default function ChatClient() {
                                     // ignore
                                   }
                                 }}
-                                title="ドラッグでサイズを変更"
+                                title={chatUi.dragResize}
                               />
                             </div>
                           </div>
@@ -1886,7 +2374,7 @@ export default function ChatClient() {
                   </>
                 ) : (
                   <div className="flex h-full items-center justify-center text-muted-foreground">
-                    左のサイドバーからキャラを選択してください
+                    {chatUi.empty}
                   </div>
                 )}
               </div>

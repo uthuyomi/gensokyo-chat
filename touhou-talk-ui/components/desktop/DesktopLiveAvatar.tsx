@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuiState } from "@assistant-ui/react";
 import VrmStage from "@/components/vrm/VrmStage";
 import { useAquesTalkAudioTts } from "@/hooks/useAquesTalkAudioTts";
+import { buildVrmPerformanceCue } from "@/lib/vrm/performanceDirector";
+import { VrmAnimationStateMachine } from "@/lib/vrm/animationStateMachine";
 
 type ThreadMessageContent = unknown;
 
@@ -26,8 +28,36 @@ function extractReadingText(meta: unknown): string | null {
   return readingText || null;
 }
 
+function extractVrmPerformanceMeta(meta: unknown):
+  | {
+      emotion?: string | null;
+      gesture?: string | null;
+      gesture_nonce?: number | null;
+      camera_yaw_deg?: number | null;
+      camera_pitch_deg?: number | null;
+      camera_distance?: number | null;
+      camera_fov?: number | null;
+    }
+  | null {
+  if (!meta || typeof meta !== "object") return null;
+  const touhouUi = (meta as Record<string, unknown>).touhou_ui;
+  if (!touhouUi || typeof touhouUi !== "object") return null;
+  const vrm = (touhouUi as Record<string, unknown>).vrm_performance;
+  if (!vrm || typeof vrm !== "object") return null;
+  return vrm as {
+    emotion?: string | null;
+    gesture?: string | null;
+    gesture_nonce?: number | null;
+    camera_yaw_deg?: number | null;
+    camera_pitch_deg?: number | null;
+    camera_distance?: number | null;
+    camera_fov?: number | null;
+  };
+}
+
 function stripForTts(raw: string): string {
   let s = String(raw ?? "");
+  s = s.normalize("NFKC");
   // Remove fenced code blocks (including ```vrm directives already stripped elsewhere).
   s = s.replace(/```[\s\S]*?```/g, " ");
   // Inline code
@@ -36,6 +66,21 @@ function stripForTts(raw: string): string {
   s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
   // Headings / bullets -> spaces
   s = s.replace(/^[#>*-]\s+/gm, "");
+  // Newlines and separators often create unnatural long pauses; smooth them out.
+  s = s.replace(/\r\n/g, "\n");
+  s = s.replace(/\n{2,}/g, "。");
+  s = s.replace(/\n+/g, "、");
+  s = s.replace(/[|｜/／]+/g, "、");
+  s = s.replace(/[‐‑‒–—―]{2,}/g, "、");
+  s = s.replace(/[~〜]{2,}/g, "、");
+  s = s.replace(/[‥…]{2,}/g, "、");
+  s = s.replace(/[「『（【〈《]+/g, " ");
+  s = s.replace(/[」』）】〉》]+/g, " ");
+  s = s.replace(/\s*([、。！？])\s*/g, "$1");
+  s = s.replace(/([、。！？]){2,}/g, "$1");
+  s = s.replace(/、。/g, "。");
+  s = s.replace(/。([！？])/g, "$1");
+  s = s.replace(/[^\S\r\n]+/g, " ");
   s = s.replace(/\s+/g, " ").trim();
   // Keep it reasonable for synth backends.
   if (s.length > 700) s = s.slice(0, 700).trim();
@@ -72,9 +117,11 @@ type DesktopCharacterSettings = {
 export default function DesktopLiveAvatar({
   characterId,
   className,
+  autoSpeak = true,
 }: {
   characterId: string | null;
   className?: string;
+  autoSpeak?: boolean;
 }) {
   const enabled = useMemo(() => isElectronUa(), []);
   const isPopout = useMemo(() => isAvatarPopoutWindow(), []);
@@ -82,6 +129,7 @@ export default function DesktopLiveAvatar({
   const [browserSpeaking, setBrowserSpeaking] = useState(false);
   const [vrmConfigured, setVrmConfigured] = useState(false);
   const [popoutActive, setPopoutActive] = useState(false);
+  const performanceMachineRef = useRef(new VrmAnimationStateMachine());
   const playbackRef = useRef<{ messageId: string | null; source: string | null }>({
     messageId: null,
     source: null,
@@ -123,6 +171,7 @@ export default function DesktopLiveAvatar({
   ) => {
     if (!characterId) return;
     const t = stripForTts(text);
+    const reading = stripForTts(String(meta?.readingText ?? ""));
     if (!t) return;
 
     playbackRef.current = {
@@ -156,7 +205,7 @@ export default function DesktopLiveAvatar({
       if (!synth || !Utterance) return;
       try {
         synth.cancel();
-        const u = new Utterance(String(meta?.readingText ?? "").trim() || t);
+        const u = new Utterance(reading || t);
         u.lang = "ja-JP";
         u.onstart = () => setBrowserSpeaking(true);
         u.onend = () => setBrowserSpeaking(false);
@@ -177,7 +226,7 @@ export default function DesktopLiveAvatar({
     } catch {
       // ignore
     }
-    await aques.speak({ text: t, readingText: meta?.readingText, characterId });
+    await aques.speak({ text: t, readingText: reading || undefined, characterId });
   }, [aques, characterId, stopAll]);
 
   const [vrmRev, setVrmRev] = useState<string>("");
@@ -256,6 +305,7 @@ export default function DesktopLiveAvatar({
     lastSpokenIdRef.current = null;
     setVrmRev("");
     setVrmConfigured(false);
+    performanceMachineRef.current = new VrmAnimationStateMachine();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characterId]);
 
@@ -303,6 +353,7 @@ export default function DesktopLiveAvatar({
   }, [enabled, characterId]);
 
   useEffect(() => {
+    if (!autoSpeak) return;
     const wasRunning = prevRunningRef.current;
     prevRunningRef.current = isRunning;
     if (!characterId) return;
@@ -321,7 +372,7 @@ export default function DesktopLiveAvatar({
       const readingText = extractReadingText((lastAssistant as any)?.metadata?.custom);
       void speak(rawText, { messageId: id, source: "auto", readingText });
      }
-  }, [isRunning, messages, characterId, speak, isPopout, popoutActive]);
+  }, [autoSpeak, isRunning, messages, characterId, speak, isPopout, popoutActive]);
 
   // Listen for "speak/stop" events coming from the chat window (manual replay, etc).
   useEffect(() => {
@@ -439,12 +490,46 @@ export default function DesktopLiveAvatar({
   // If TTS is disabled, we must NOT animate as if speaking just because a model run is in progress.
   const stageSpeaking = aques.speaking || browserSpeaking;
   const getLipSyncFrame = aques.getLipSyncFrame;
+  const latestAssistant = [...messages].reverse().find((m: any) => (m as any)?.role === "assistant") as any;
+  const fallbackCue = buildVrmPerformanceCue({
+    characterId,
+    text: extractTextFromContent(latestAssistant?.content),
+    messageId: String(latestAssistant?.id ?? ""),
+    speaking: stageSpeaking,
+  });
+  const metaCue = extractVrmPerformanceMeta((latestAssistant as any)?.metadata?.custom);
+  const performanceCue = {
+    emotion: (metaCue?.emotion as any) ?? fallbackCue.emotion,
+    gesture: (metaCue?.gesture as any) ?? fallbackCue.gesture,
+    gestureNonce:
+      typeof metaCue?.gesture_nonce === "number" ? metaCue.gesture_nonce : fallbackCue.gestureNonce,
+    cameraYawDeg:
+      typeof metaCue?.camera_yaw_deg === "number" ? metaCue.camera_yaw_deg : fallbackCue.cameraYawDeg,
+    cameraPitchDeg:
+      typeof metaCue?.camera_pitch_deg === "number" ? metaCue.camera_pitch_deg : fallbackCue.cameraPitchDeg,
+    cameraDistance:
+      typeof metaCue?.camera_distance === "number" ? metaCue.camera_distance : fallbackCue.cameraDistance,
+    cameraFov:
+      typeof metaCue?.camera_fov === "number" ? metaCue.camera_fov : fallbackCue.cameraFov,
+  };
+  const stagedCue = performanceMachineRef.current.resolve({
+    ...performanceCue,
+    messageKey: String(latestAssistant?.id ?? latestAssistant?.metadata?.custom?._messageKey ?? "idle"),
+    speaking: stageSpeaking,
+  });
 
   return (
     <div className={className}>
       <VrmStage
         url={url}
         speaking={stageSpeaking}
+        emotion={stagedCue.emotion}
+        gesture={stagedCue.gesture}
+        gestureNonce={stagedCue.gestureNonce}
+        cameraYawDeg={stagedCue.cameraYawDeg}
+        cameraPitchDeg={stagedCue.cameraPitchDeg}
+        cameraDistance={stagedCue.cameraDistance}
+        cameraFov={stagedCue.cameraFov}
         getLipSyncFrame={getLipSyncFrame}
         className="h-full w-full"
       />

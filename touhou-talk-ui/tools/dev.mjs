@@ -59,6 +59,16 @@ function applyDesktopEnvFromFile() {
 // If running desktop dev runner, it passes TOUHOU_DESKTOP_ENV_PATH; load it so SSR/API sees SIGMARIS_CORE_URL etc.
 applyDesktopEnvFromFile();
 
+function shouldForceWebpack() {
+  const explicit = String(process.env.TOUHOU_FORCE_WEBPACK ?? "").trim().toLowerCase();
+  if (explicit === "1" || explicit === "true" || explicit === "yes") return true;
+  if (explicit === "0" || explicit === "false" || explicit === "no") return false;
+
+  // This repo currently hits a Turbopack panic in browser auth/login as well as desktop flows,
+  // so keep the default dev server on webpack unless a maintainer explicitly opts out.
+  return true;
+}
+
 // On Windows, spawning `.cmd` directly can fail (EINVAL). Spawn the JS CLI via Node instead.
 const nextCli = path.resolve(appDir, "node_modules", "next", "dist", "bin", "next");
 if (!existsSync(nextCli)) {
@@ -66,7 +76,8 @@ if (!existsSync(nextCli)) {
   process.exit(1);
 }
 
-const child = spawn(process.execPath, [nextCli, "dev", ...process.argv.slice(2)], {
+const extraArgs = shouldForceWebpack() ? ["--webpack"] : [];
+const child = spawn(process.execPath, [nextCli, "dev", ...extraArgs, ...process.argv.slice(2)], {
   stdio: "inherit",
   cwd: appDir,
   env: process.env,

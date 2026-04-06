@@ -177,7 +177,7 @@ export default function AvatarClient() {
         </div>
       </div>
       <AssistantRuntimeProvider runtime={runtime}>
-        <DesktopLiveAvatar characterId={char} className="h-full w-full" />
+        <DesktopLiveAvatar characterId={char} className="h-full w-full" autoSpeak={false} />
       </AssistantRuntimeProvider>
     </div>
   );

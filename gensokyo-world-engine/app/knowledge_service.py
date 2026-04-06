@@ -30,6 +30,7 @@ _KIND_SIZES = {
     "chronicle_entry": 1.35,
     "chat_context": 1.0,
 }
+_MAX_KNOWLEDGE_UNIVERSE_LIMIT = 2000
 
 
 def _unit_normalize(values: List[float]) -> List[float]:
@@ -163,7 +164,7 @@ async def get_knowledge_universe(
         records = await fetch_knowledge_embeddings(
             client,
             world_id=world_id,
-            limit=max(1, min(limit, 600)),
+            limit=max(1, min(limit, _MAX_KNOWLEDGE_UNIVERSE_LIMIT)),
             embedding_model=embedding_model,
         )
 

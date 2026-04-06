@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon, XIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useLanguage } from "@/components/i18n/LanguageProvider";
 import { cn } from "@/lib/utils";
 
 type Hit = {
@@ -59,9 +60,7 @@ function flashHighlight(el: HTMLElement) {
   const prevOutline = el.style.outline;
   const prevOutlineOffset = el.style.outlineOffset;
 
-  // Scroll offset safety (sticky header)
   el.style.scrollMarginTop = "5rem";
-
   el.style.outline = "2px solid rgba(56, 189, 248, 0.9)";
   el.style.outlineOffset = "6px";
   el.style.boxShadow =
@@ -76,6 +75,36 @@ function flashHighlight(el: HTMLElement) {
 
 export function ThreadSearch(props: { activeSessionId: string | null }) {
   const { activeSessionId } = props;
+  const { lang } = useLanguage();
+  const copy = useMemo(
+    () =>
+      lang === "ja"
+        ? {
+            open: "\u4f1a\u8a71\u5185\u691c\u7d22\u3092\u958b\u304f",
+            title: "\u4f1a\u8a71\u5185\u691c\u7d22",
+            description:
+              "\u3053\u306e\u4f1a\u8a71\u306e\u30e1\u30c3\u30bb\u30fc\u30b8\u3092\u691c\u7d22\u3067\u304d\u307e\u3059\u3002Enter \u3067\u6b21\u3001Shift+Enter \u3067\u524d\u306e\u4e00\u81f4\u7b87\u6240\u3078\u79fb\u52d5\u3057\u307e\u3059\u3002",
+            placeholder: "\u4f1a\u8a71\u5185\u3092\u691c\u7d22...",
+            hint: "Enter \u3067\u6b21\u3078 / Shift+Enter \u3067\u524d\u3078",
+            searchField: "\u4f1a\u8a71\u5185\u691c\u7d22",
+            previous: "\u524d\u306e\u4e00\u81f4\u3078",
+            next: "\u6b21\u306e\u4e00\u81f4\u3078",
+            clear: "\u691c\u7d22\u3092\u30af\u30ea\u30a2",
+          }
+        : {
+            open: "Open in-thread search",
+            title: "Search this conversation",
+            description:
+              "Search messages in the current conversation. Press Enter for next match, or Shift+Enter for previous.",
+            placeholder: "Search this conversation...",
+            hint: "Enter for next / Shift+Enter for previous",
+            searchField: "Conversation search",
+            previous: "Previous match",
+            next: "Next match",
+            clear: "Clear search",
+          },
+    [lang],
+  );
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -127,7 +156,6 @@ export function ThreadSearch(props: { activeSessionId: string | null }) {
     el.style.height = Math.min(el.scrollHeight, max) + "px";
   }, []);
 
-  // Reset on session switch.
   useEffect(() => {
     const resetId = window.setTimeout(() => {
       setQuery("");
@@ -137,7 +165,6 @@ export function ThreadSearch(props: { activeSessionId: string | null }) {
     return () => window.clearTimeout(resetId);
   }, [activeSessionId, clearHits]);
 
-  // Debounced search
   useEffect(() => {
     if (!query.trim()) {
       const resetId = window.setTimeout(() => clearHits(), 0);
@@ -148,13 +175,11 @@ export function ThreadSearch(props: { activeSessionId: string | null }) {
     return () => window.clearTimeout(handle);
   }, [query, recomputeHits, clearHits]);
 
-  // Auto-resize the textarea while open.
   useEffect(() => {
     if (!open) return;
     resizeTextarea();
   }, [open, query, resizeTextarea]);
 
-  // Click outside to close.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -211,15 +236,37 @@ export function ThreadSearch(props: { activeSessionId: string | null }) {
             window.setTimeout(() => textareaRef.current?.focus(), 0);
           }}
           disabled={!hasSession}
-          aria-label="スレッド内検索を開く"
+          aria-label={copy.open}
         >
           <SearchIcon className="size-4" />
         </Button>
 
         {open ? (
-          <div className="absolute right-0 top-full z-50 mt-2 w-[min(520px,calc(100vw-2rem))] rounded-xl border bg-background/90 p-3 shadow-lg backdrop-blur">
-            <div className="flex items-start gap-2">
-              <div className="flex-1">
+          <div className="absolute right-0 top-full z-50 mt-3 w-[42rem] max-w-[calc(100vw-2rem)] rounded-2xl border border-border/70 bg-background/95 p-4 shadow-xl backdrop-blur">
+            <div className="grid gap-3 rounded-2xl border border-border/60 bg-muted/20 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <SearchIcon className="size-4 text-muted-foreground" />
+                  <span>{copy.title}</span>
+                </div>
+                <div className="mt-1 text-xs leading-6 text-muted-foreground sm:max-w-[34rem]">
+                  {copy.description}
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 rounded-full"
+                onClick={() => setOpen(false)}
+                aria-label={lang === "ja" ? "検索を閉じる" : "Close search"}
+              >
+                <XIcon className="size-4" />
+              </Button>
+            </div>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+              <div className="min-w-0">
                 <textarea
                   ref={textareaRef}
                   value={query}
@@ -238,62 +285,43 @@ export function ThreadSearch(props: { activeSessionId: string | null }) {
                       else goNext();
                     }
                   }}
-                  placeholder="スレッド内検索（Enterで次 / Shift+Enterで前）"
+                  placeholder={copy.placeholder}
                   className={cn(
-                    "w-full resize-none rounded-lg border border-input bg-background/70 px-3 py-2 text-sm text-foreground shadow-xs outline-none",
+                    "min-h-[56px] w-full resize-none rounded-xl border border-input bg-background/70 px-4 py-3 text-sm text-foreground shadow-xs outline-none",
                     "placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
                   )}
-                  rows={1}
-                  aria-label="スレッド内検索"
+                  rows={2}
+                  aria-label={copy.searchField}
                 />
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  <div className="text-muted-foreground text-xs tabular-nums">
-                    {query.trim() ? counterLabel : ""}
-                  </div>
-                  <div
-                    className={cn(
-                      "flex items-center gap-1",
-                      !query.trim() && "opacity-50",
-                    )}
-                  >
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={goPrev}
-                      disabled={hitCount <= 0}
-                      aria-label="前の一致へ"
-                    >
-                      <ChevronUpIcon className="size-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={goNext}
-                      disabled={hitCount <= 0}
-                      aria-label="次の一致へ"
-                    >
-                      <ChevronDownIcon className="size-4" />
-                    </Button>
-                  </div>
-                </div>
               </div>
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="shrink-0 rounded-full"
+              <div className="flex shrink-0 items-center gap-2 sm:pt-1">
+                <Button type="button" variant="ghost" size="icon-sm" className="rounded-full" onClick={goPrev} disabled={hitCount <= 0} aria-label={copy.previous}>
+                  <ChevronUpIcon className="size-4" />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-sm" className="rounded-full" onClick={goNext} disabled={hitCount <= 0} aria-label={copy.next}>
+                  <ChevronDownIcon className="size-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="rounded-full"
                   onClick={() => {
                     setQuery("");
                     clearHits();
                     textareaRef.current?.focus();
                   }}
-                aria-label="検索をクリア"
-              >
-                <XIcon className="size-4" />
-              </Button>
+                  aria-label={copy.clear}
+                >
+                  <XIcon className="size-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-muted-foreground">
+              <div>{copy.hint}</div>
+              <div className="tabular-nums">{query.trim() ? counterLabel : ""}</div>
             </div>
           </div>
         ) : null}

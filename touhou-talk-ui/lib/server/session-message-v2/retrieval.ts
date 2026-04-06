@@ -70,10 +70,6 @@ export function detectAutoBrowse(text: string): {
   const t = String(text ?? "").trim();
   if (!t) return { enabled: false, query: "", recency_days: 7, domains: null };
 
-  if ((process.env.SIGMARIS_AUTO_BROWSE_ENABLED ?? "").toLowerCase() === "0") {
-    return { enabled: false, query: "", recency_days: 7, domains: null };
-  }
-
   const optOut = [
     "検索しないで",
     "ネット見ないで",
@@ -149,70 +145,70 @@ export async function coreJson<T>(params: {
   return { ok: r.ok, status: r.status, json, text };
 }
 
-export async function uploadAndParseFiles(params: {
+function guessUploadKind(file: File): string {
+  const mime = String(file.type || "").toLowerCase();
+  const name = String(file.name || "").toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (
+    mime.startsWith("text/") ||
+    mime.includes("json") ||
+    mime.includes("xml") ||
+    mime.includes("yaml") ||
+    mime.includes("markdown") ||
+    mime.includes("javascript") ||
+    mime.includes("typescript") ||
+    mime.includes("pdf")
+  ) {
+    return "text";
+  }
+  if (/\.(txt|md|markdown|json|jsonl|xml|yml|yaml|csv|ts|tsx|js|jsx|py|java|c|cpp|cs|go|rs|rb|php|html|css|sql|pdf)$/i.test(name)) {
+    return "text";
+  }
+  return "binary";
+}
+
+export async function uploadFilesForSdk(params: {
   base: string;
   accessToken: string | null;
   files: File[];
 }): Promise<Phase04Attachment[]> {
-  const out: Phase04Attachment[] = [];
+  const uploaded = await Promise.all(
+    params.files.slice(0, 3).map(async (file): Promise<Phase04Attachment | null> => {
+      try {
+        const form = new FormData();
+        form.append("file", file, file.name);
+        const up = await fetch(`${params.base}/io/upload`, {
+          method: "POST",
+          headers: {
+            ...(params.accessToken ? { Authorization: `Bearer ${params.accessToken}` } : {}),
+          },
+          body: form,
+        });
+        if (!up.ok) return null;
 
-  for (const file of params.files.slice(0, 3)) {
-    try {
-      const form = new FormData();
-      form.append("file", file, file.name);
-      const up = await fetch(`${params.base}/io/upload`, {
-        method: "POST",
-        headers: {
-          ...(params.accessToken ? { Authorization: `Bearer ${params.accessToken}` } : {}),
-        },
-        body: form,
-      });
-      if (!up.ok) continue;
+        const upJson = (await up.json().catch(() => null)) as
+          | { attachment_id?: unknown; file_name?: unknown; mime_type?: unknown }
+          | null;
+        const attachmentId = typeof upJson?.attachment_id === "string" ? upJson.attachment_id : null;
+        if (!attachmentId) return null;
 
-      const upJson = (await up.json().catch(() => null)) as
-        | { attachment_id?: unknown; file_name?: unknown; mime_type?: unknown }
-        | null;
-      const attachmentId = typeof upJson?.attachment_id === "string" ? upJson.attachment_id : null;
-      if (!attachmentId) continue;
+        return {
+          type: "upload",
+          attachment_id: attachmentId,
+          file_name: typeof upJson?.file_name === "string" ? upJson.file_name : file.name,
+          mime_type:
+            typeof upJson?.mime_type === "string"
+              ? upJson.mime_type
+              : (file.type || "application/octet-stream"),
+          kind: guessUploadKind(file),
+        };
+      } catch {
+        return null;
+      }
+    }),
+  );
 
-      const parsed = await coreJson<{ ok?: boolean; kind?: unknown; parsed?: unknown }>({
-        url: `${params.base}/io/parse`,
-        accessToken: params.accessToken,
-        body: { attachment_id: attachmentId, kind: null },
-      });
-      const kind = typeof parsed.json?.kind === "string" ? parsed.json.kind : "unknown";
-
-      const parsedAny = (parsed.json as any)?.parsed;
-      const excerptCandidate =
-        typeof parsedAny?.raw_excerpt === "string"
-          ? parsedAny.raw_excerpt
-          : typeof parsedAny?.text_excerpt === "string"
-            ? parsedAny.text_excerpt
-            : typeof parsedAny?.content_summary === "string"
-              ? parsedAny.content_summary
-              : typeof parsedAny?.excerpt_summary === "string"
-                ? parsedAny.excerpt_summary
-                : typeof parsedAny?.ocr?.detected_text === "string"
-                  ? parsedAny.ocr.detected_text
-              : "";
-
-      out.push({
-        type: "upload",
-        attachment_id: attachmentId,
-        file_name: typeof upJson?.file_name === "string" ? upJson.file_name : file.name,
-        mime_type:
-          typeof upJson?.mime_type === "string"
-            ? upJson.mime_type
-            : (file.type || "application/octet-stream"),
-        kind,
-        parsed_excerpt: excerptCandidate ? clampText(String(excerptCandidate), 1200) : undefined,
-      });
-    } catch {
-      // ignore single-file failure
-    }
-  }
-
-  return out;
+  return uploaded.filter((item): item is Phase04Attachment => Boolean(item));
 }
 
 export async function analyzeLinks(params: {
@@ -360,27 +356,4 @@ export async function autoBrowseFromText(params: {
 
   const fetched = await analyzeLinks({ base: params.base, accessToken: params.accessToken, urls });
   return [...analyses, ...fetched];
-}
-
-export function buildAugmentedMessage(params: {
-  userText: string;
-  uploads: Phase04Attachment[];
-  linkAnalyses: Phase04LinkAnalysis[];
-}) {
-  let msg = String(params.userText ?? "").trim();
-
-  if (params.uploads.length > 0) {
-    const lines: string[] = [];
-    lines.push("[添付ファイルの解析結果（自動）]");
-    for (const a of params.uploads.slice(0, 3)) {
-      const head = `- ${a.file_name} (${a.kind}, ${a.mime_type})`;
-      const body = a.parsed_excerpt
-        ? `  ${clampText(a.parsed_excerpt.replace(/\s+/g, " ").trim(), 900)}`
-        : "";
-      lines.push(body ? `${head}\n${body}` : head);
-    }
-    msg += "\n\n" + lines.join("\n");
-  }
-
-  return clampText(msg, 12000);
 }

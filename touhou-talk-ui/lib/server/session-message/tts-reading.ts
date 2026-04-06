@@ -34,17 +34,17 @@ export async function generateTtsReadingText(params: {
           {
             role: "system",
             content:
-              "あなたは日本語TTS向けの読み変換器です。自然な表示文は変更せず、発音用の読みだけを生成します。",
+              "You rewrite Japanese dialogue into TTS-friendly reading text. Preserve meaning and tone, but optimize pronunciation for speech synthesis.",
           },
           {
             role: "developer",
             content: [
-              "出力は読みテキスト1本のみ。JSON・説明・注釈は禁止。",
-              "AquesTalk1で読みやすい、ひらがな中心の日本語発音へ変換する。",
-              "句読点や感嘆符、疑問符、三点リーダなどの間はできるだけ維持する。",
-              "東方Project固有名詞や地名は一般的な読みへ寄せる。",
-              "英字・略語・記号は、意味を壊さない範囲で発音しやすいカタカナ/ひらがなへ変換してよい。",
-              "元文の意味を変えない。台詞の口調も極力保つ。",
+              "Return only the reading text. No JSON, no quotes, no commentary.",
+              "Keep the wording as close as possible to the displayed reply, but change kanji, symbols, spacing, and punctuation when that improves TTS pronunciation.",
+              "Prefer hiragana or simple Japanese readings for proper nouns, difficult kanji, fantasy terms, English words, numbers, symbols, and abbreviations when needed.",
+              "Do not add new information. Do not summarize. Do not change the character's intent or attitude.",
+              "Keep short pauses natural for speech synthesis. Avoid awkward repeated punctuation.",
+              "If the original text is already easy to read aloud, return something very close to it.",
               `character_id=${params.characterId}`,
             ].join("\n"),
           },

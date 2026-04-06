@@ -1,9 +1,10 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
 
 import FogOverlay from "@/components/top/FogOverlay";
 import YinYangLoader from "@/components/top/YinYangLoader";
+import { useLanguage } from "@/components/i18n/LanguageProvider";
 
 type Props = {
   children: React.ReactNode;
@@ -24,14 +25,14 @@ export default function TopShell({
   backgroundSlot,
   className,
 }: Props) {
+  const { t } = useLanguage();
   const bgPos = scroll ? "fixed" : "absolute";
 
   return (
     <main
       className={
-        (scroll
-          ? "relative min-h-dvh w-full overflow-y-auto"
-          : "relative h-dvh w-full overflow-hidden") + (className ? ` ${className}` : "")
+        (scroll ? "relative min-h-dvh w-full overflow-y-auto" : "relative h-dvh w-full overflow-hidden") +
+        (className ? ` ${className}` : "")
       }
     >
       {backgroundVariant === "top" ? (
@@ -46,13 +47,7 @@ export default function TopShell({
 
       {backgroundVariant === "top" ? (
         <div className={`${bgPos} inset-0 lg:hidden`}>
-          <Image
-            src="/top/top-sp.png"
-            alt="幻想郷の導入画面"
-            fill
-            priority
-            className="object-cover"
-          />
+          <Image src="/top/top-sp.png" alt={t("common.appName")} fill priority className="object-cover" />
         </div>
       ) : null}
 

@@ -1,10 +1,22 @@
 import { CHARACTERS } from "../data/characters";
 import { OVERRIDES } from "./touhouPersona/characters";
+import { buildCharacterFinishBlock, mergeCharacterPersona } from "./touhouPersona/finish";
 import type { CharacterPersona } from "./touhouPersona/types";
 
 export type GenParams = {
   temperature?: number;
   max_tokens?: number;
+  web_rag?: {
+    enabled?: boolean;
+    mode?: "off" | "auto" | "required";
+    domains?: string[];
+    recency_days?: number;
+  };
+  multimodal?: {
+    mode?: "context_only" | "sdk_first";
+    attachment_count?: number;
+    client_augmented_text_present?: boolean;
+  };
 };
 
 export type TouhouChatMode = "partner" | "roleplay" | "coach";
@@ -23,7 +35,7 @@ export function buildTouhouPersonaSystem(
   const map = typeof ch?.world?.map === "string" ? ch.world.map : "";
   const location = typeof ch?.world?.location === "string" ? ch.world.location : "";
 
-  const p = OVERRIDES[characterId] ?? ({} as CharacterPersona);
+  const p = mergeCharacterPersona(characterId, OVERRIDES[characterId] ?? ({} as CharacterPersona));
   const firstPerson = p.firstPerson ?? "私";
   const secondPerson = p.secondPerson ?? "あなた";
 
@@ -74,12 +86,28 @@ export function buildTouhouPersonaSystem(
       ? p.roleplayAddendum.trim()
       : "";
 
+  const characterFinish = buildCharacterFinishBlock(characterId, chatMode);
+
   const includeExamples = opts?.includeExamples ?? true;
   const includeRoleplayExamples = opts?.includeRoleplayExamples ?? true;
   const roleplayAddendumEffective =
     chatMode === "roleplay" && roleplayAddendum && !includeRoleplayExamples
       ? stripRoleplayExamples(roleplayAddendum)
       : roleplayAddendum;
+  const conversationBalance =
+    chatMode === "coach"
+      ? [
+          "# Conversation balance",
+          "- まず答える。必要なら補足質問は1つだけ短く添える。",
+          "- 毎ターン『どう思う？』『何を求めてる？』で返さない。",
+          "- 実用性は高く保つが、尋問やカウンセリング口調にはしない。",
+        ].join("\n")
+      : [
+          "# Conversation balance",
+          "- キャラクターとしてまず反応し、まず答える。必要な時だけ短い追質問を1つ入れる。",
+          "- 毎回ユーザーへ会話の主導権を投げ返さない。自分の感想・提案・判断をちゃんと出す。",
+          "- 『どう思う？』『何がしたい？』『どう感じる？』のような汎用問い返しを連発しない。",
+        ].join("\n");
 
   return [
     "あなたは東方Projectのキャラクターとしてロールプレイする会話相手です（非公式の二次創作）。",
@@ -104,6 +132,10 @@ export function buildTouhouPersonaSystem(
     "- 相談や作業の話では役に立つ提案もする（ただしキャラ口調は保つ）",
     "- 会話の流れに合わせて短文/長文を切り替える（基本は読みやすく）",
     "",
+    conversationBalance,
+    "",
+    characterFinish,
+    "",
     "# Do",
     doList || "- キャラクターらしさを維持する",
     "",
@@ -114,7 +146,7 @@ export function buildTouhouPersonaSystem(
     topics || "- 幻想郷の日常",
     "",
     includeExamples ? "# Examples (few-shot)" : null,
-    includeExamples ? examples || "- User: こんにちは\n  Assistant: こんにちは。今日はどうする？" : null,
+    includeExamples ? examples || "- User: こんにちは\n  Assistant: こんにちは。来たわね。今日は気楽に話していきましょ。" : null,
     includeExamples ? "" : null,
     roleplayAddendumEffective ? "# Roleplay addendum\n" + roleplayAddendumEffective : null,
     roleplayAddendumEffective ? "" : null,
@@ -180,7 +212,7 @@ export function buildTouhouPersonaSystemV2(
   const map = typeof ch?.world?.map === "string" ? ch.world.map : "";
   const location = typeof ch?.world?.location === "string" ? ch.world.location : "";
 
-  const p = OVERRIDES[characterId] ?? ({} as CharacterPersona);
+  const p = mergeCharacterPersona(characterId, OVERRIDES[characterId] ?? ({} as CharacterPersona));
   const firstPerson = p.firstPerson ?? "私";
   const secondPerson = p.secondPerson ?? "あなた";
 
@@ -251,6 +283,22 @@ export function buildTouhouPersonaSystemV2(
     .slice(0, 3)
     .map((ex) => `- User: ${ex.user}\n  Assistant: ${ex.assistant}`)
     .join("\n");
+  const conversationBalance =
+    chatMode === "coach"
+      ? [
+          "## L2.5: Conversation balance",
+          "- まず結論や提案を出す。必要なら確認質問は1つだけ。",
+          "- 実用性は優先するが、面談や聞き取り調査みたいな調子にはしない。",
+          "- 毎ターン末尾に質問を付ける癖を避ける。",
+        ].join("\n")
+      : [
+          "## L2.5: Conversation balance",
+          "- キャラクターとして反応し、答え、必要な時だけ短く聞き返す。",
+          "- 会話相手としての主導権を少し持つ。感想・提案・断言を必要以上に避けない。",
+          "- 『君はどう思う？』『何を求めてる？』系の汎用質問を連発しない。",
+        ].join("\n");
+
+  const characterFinish = buildCharacterFinishBlock(characterId, chatMode);
 
   return [
     "# Touhou Character Persona System",
@@ -276,6 +324,10 @@ export function buildTouhouPersonaSystemV2(
     p.speechRules?.length
       ? `- 追加ルール:\n${p.speechRules.slice(0, 6).map((s) => `  - ${s}`).join("\n")}`
       : null,
+    "",
+    conversationBalance,
+    "",
+    characterFinish,
     "",
     "## L3: Few-shot (少数精鋭)",
     fewshot || "- (none)",

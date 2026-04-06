@@ -379,6 +379,44 @@ class SupabasePersonaDB:
             return None
         return rows[0] if isinstance(rows[0], dict) else None
 
+    def update_attachment_meta(self, *, attachment_id: str, meta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        rows = self._c.patch(
+            "common_attachments",
+            {"meta": meta or {}},
+            filters=[f"attachment_id=eq.{attachment_id}"],
+        )
+        if isinstance(rows, list) and rows:
+            row = rows[0]
+            return row if isinstance(row, dict) else None
+        return None
+
+    def list_attachments(
+        self,
+        *,
+        user_id: Optional[str] = None,
+        attachment_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        filters: List[str] = []
+        if user_id:
+            filters.append(f"user_id=eq.{user_id}")
+        if attachment_id:
+            filters.append(f"attachment_id=eq.{attachment_id}")
+        rows = self._c.select(
+            "common_attachments",
+            columns="attachment_id,user_id,bucket_id,object_path,file_name,mime_type,size_bytes,sha256,meta,created_at",
+            filters=filters or None,
+            order="created_at.desc",
+            limit=int(limit),
+            offset=int(offset),
+        )
+        out: List[Dict[str, Any]] = []
+        for row in rows or []:
+            if isinstance(row, dict):
+                out.append(row)
+        return out
+
     def load_last_ego_state(self, *, user_id: str) -> Optional[Dict[str, Any]]:
         rows = self._c.select(
             "common_ego_snapshots",

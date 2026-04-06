@@ -29,3 +29,39 @@ export function withTtsReadingMeta(
   if (model) tts.reading_model = model;
   return { ...base, tts };
 }
+
+export function summarizeCoreRoutingMeta(
+  base: unknown,
+): Record<string, unknown> {
+  const meta = isRecord(base) ? base : {};
+  const controllerMeta = isRecord(meta.controller_meta)
+    ? (meta.controller_meta as Record<string, unknown>)
+    : {};
+  const webRag = isRecord(meta.web_rag)
+    ? (meta.web_rag as Record<string, unknown>)
+    : {};
+  const webMeta = isRecord(webRag.meta)
+    ? (webRag.meta as Record<string, unknown>)
+    : {};
+
+  return {
+    intent_route:
+      typeof meta.intent_route === "string" ? meta.intent_route : null,
+    lightweight_turn:
+      typeof controllerMeta.lightweight_turn === "boolean"
+        ? controllerMeta.lightweight_turn
+        : null,
+    lightweight_reason:
+      typeof controllerMeta.reason === "string" ? controllerMeta.reason : null,
+    web_provider:
+      typeof webMeta.provider === "string" ? webMeta.provider : null,
+    web_intent:
+      typeof webMeta.intent === "string" ? webMeta.intent : null,
+    web_skipped_reason:
+      typeof webMeta.skipped_reason === "string"
+        ? webMeta.skipped_reason
+        : null,
+    web_sources_count:
+      typeof webRag.sources_count === "number" ? webRag.sources_count : null,
+  };
+}

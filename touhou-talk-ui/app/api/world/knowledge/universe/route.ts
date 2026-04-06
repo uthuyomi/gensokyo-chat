@@ -9,7 +9,7 @@ import { worldEngineBaseUrl, worldEngineHeaders } from "@/app/api/world/_worldEn
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const worldId = (url.searchParams.get("world_id") || "").trim() || "gensokyo_main";
-  const limit = (url.searchParams.get("limit") || "").trim() || "240";
+  const limit = (url.searchParams.get("limit") || "").trim() || "2000";
   const embeddingModel = (url.searchParams.get("embedding_model") || "").trim();
   const maxEdgesPerNode = (url.searchParams.get("max_edges_per_node") || "").trim() || "2";
   const similarityThreshold = (url.searchParams.get("similarity_threshold") || "").trim() || "0.32";

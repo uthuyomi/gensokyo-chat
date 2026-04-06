@@ -358,6 +358,7 @@ def rebuild_ja_bundles() -> None:
         ROOT / "WORLD_APPLY_BUNDLE02.sql",
         ROOT / "WORLD_LOCALIZE_JA_MASTERS.sql",
         ROOT / "WORLD_LOCALIZE_JA.sql",
+        ROOT / "WORLD_LOCALIZE_JA_DEEP.sql",
     ]
     for target, parts in ((JA_BUNDLE01_PATH, parts01), (JA_BUNDLE02_PATH, parts02)):
         chunks = [f"-- AUTO-GENERATED JA BUNDLE: {target.name}\n"]

@@ -1,4 +1,4 @@
--- World localization patch: Japanese master labels (fully curated)
+﻿-- World localization patch: Japanese master labels (fully curated)
 
 update public.world_characters set name = '稗田 阿求', title = '御阿礼の子', updated_at = now() where world_id = 'gensokyo_main' and id = 'akyuu';
 update public.world_characters set name = 'アリス・マーガトロイド', title = '七色の人形遣い', updated_at = now() where world_id = 'gensokyo_main' and id = 'alice';

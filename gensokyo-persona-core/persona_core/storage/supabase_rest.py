@@ -138,12 +138,15 @@ class SupabaseRESTClient:
         filters: Optional[List[str]] = None,
         order: Optional[str] = None,
         limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Any:
         q: Dict[str, str] = {"select": columns}
         if order:
             q["order"] = order
         if limit is not None:
             q["limit"] = str(int(limit))
+        if offset is not None:
+            q["offset"] = str(int(offset))
 
         path = f"/rest/v1/{table}"
         if filters:
@@ -156,3 +159,17 @@ class SupabaseRESTClient:
         _, payload = self.request("GET", path, query=q)
         return payload
 
+    def patch(
+        self,
+        table: str,
+        row: Dict[str, Any],
+        *,
+        filters: Optional[List[str]] = None,
+    ) -> Any:
+        q: Dict[str, str] = {}
+        if filters:
+            for f in filters:
+                k, v = f.split("=", 1)
+                q[k] = v
+        _, payload = self.request("PATCH", f"/rest/v1/{table}", query=q or None, json_body=row)
+        return payload

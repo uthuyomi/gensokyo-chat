@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React from "react";
 import { useRouter } from "next/navigation";
@@ -10,13 +10,11 @@ import TopShell from "@/components/top/TopShell";
 import EntryTouhouBackground from "@/app/entry/EntryTouhouBackground";
 import styles from "@/app/entry/entry-theme.module.css";
 import { getLastSelectedChatNext } from "@/components/entry/EntrySelectionTracker";
+import { useLanguage } from "@/components/i18n/LanguageProvider";
 
 type Provider = "google" | "github" | "discord";
 
-const providerIcon: Record<
-  Provider,
-  React.ComponentType<{ className?: string; size?: number }>
-> = {
+const providerIcon: Record<Provider, React.ComponentType<{ className?: string; size?: number }>> = {
   google: SiGoogle,
   github: SiGithub,
   discord: SiDiscord,
@@ -36,6 +34,7 @@ export default function LoginClient(props: {
   initialError?: string | null;
   initialErrorDescription?: string | null;
 }) {
+  const { t } = useLanguage();
   const router = useRouter();
   const [loadingProvider, setLoadingProvider] = React.useState<Provider | null>(null);
   const [error, setError] = React.useState<string | null>(
@@ -92,9 +91,9 @@ export default function LoginClient(props: {
   }
 
   const providers: Array<{ id: Provider; label: string }> = [
-    { id: "google", label: "Google でログイン" },
-    { id: "github", label: "GitHub でログイン" },
-    { id: "discord", label: "Discord でログイン" },
+    { id: "google", label: t("auth.continueWith.google") },
+    { id: "github", label: t("auth.continueWith.github") },
+    { id: "discord", label: t("auth.continueWith.discord") },
   ];
 
   return (
@@ -105,17 +104,11 @@ export default function LoginClient(props: {
       className={`${styles.entryTheme} bg-background text-foreground`}
     >
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card/85 p-6 text-card-foreground shadow-sm backdrop-blur">
-        <h1 className="mb-4 text-lg font-semibold tracking-wide">ログイン</h1>
+        <h1 className="mb-4 text-lg font-semibold tracking-wide">{t("auth.loginTitle")}</h1>
 
-        <p className="mb-4 text-sm text-muted-foreground">
-          Supabase Auth の OAuth を利用してログインします。
-        </p>
+        <p className="mb-4 text-sm text-muted-foreground">{t("auth.loginDescription")}</p>
 
-        {nextSafe ? (
-          <p className="mb-4 text-xs text-muted-foreground">
-            ログイン後は直前に選択していたページへ戻ります。
-          </p>
-        ) : null}
+        {nextSafe ? <p className="mb-4 text-xs text-muted-foreground">{t("auth.loginRedirectHint")}</p> : null}
 
         {error ? <p className="mb-2 text-sm text-destructive">{error}</p> : null}
 
@@ -136,17 +129,14 @@ export default function LoginClient(props: {
                 }
               >
                 <Icon className="h-4 w-4" aria-hidden />
-                <span>{isLoading ? "リダイレクト中..." : label}</span>
+                <span>{isLoading ? t("auth.redirecting") : label}</span>
               </button>
             );
           })}
         </div>
 
-        <button
-          onClick={() => router.push("/")}
-          className="mt-4 text-xs text-muted-foreground hover:text-foreground"
-        >
-          戻る
+        <button onClick={() => router.push("/")} className="mt-4 text-xs text-muted-foreground hover:text-foreground">
+          {t("common.back")}
         </button>
       </div>
     </TopShell>

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -11,6 +11,7 @@ import {
   type CharacterDef,
 } from "@/data/characters";
 import { setLastSelectedChatNext } from "@/components/entry/EntrySelectionTracker";
+import { useLanguage } from "@/components/i18n/LanguageProvider";
 
 import FadeIn from "@/components/ui/entry/FadeIn";
 
@@ -27,22 +28,20 @@ function buildNextPathForCharacterId(characterId: string) {
 
 function HeroCharacterButton({
   characterId,
-  label,
-  verb = "と話す",
   className,
   showAvatar = false,
 }: {
   characterId: string;
-  label: string;
-  verb?: string;
   className?: string;
   showAvatar?: boolean;
 }) {
+  const { t } = useLanguage();
   const ch: CharacterDef | undefined = CHARACTERS[characterId];
   const selectable = isCharacterSelectable(ch);
   const nextPath = buildNextPathForCharacterId(characterId);
   const href = `/auth/login?next=${encodeURIComponent(nextPath)}`;
   const avatarSrc = typeof ch?.ui?.avatar === "string" ? ch.ui.avatar : "";
+  const label = ch?.name ?? characterId;
 
   const content = (
     <span className="flex w-full items-center justify-center gap-2">
@@ -51,10 +50,7 @@ function HeroCharacterButton({
           <Image src={avatarSrc} alt="" fill className="object-cover" />
         </span>
       ) : null}
-      <span className="text-center leading-tight">
-        {label}
-        {verb}
-      </span>
+      <span className="text-center leading-tight">{`${t("entry.talkWith")} ${label}`}</span>
     </span>
   );
 
@@ -82,13 +78,14 @@ function HeroCharacterButton({
             <Image src={avatarSrc} alt="" fill className="object-cover opacity-60" />
           </span>
         ) : null}
-        <span className="whitespace-nowrap">{label}（準備中）</span>
+        <span className="whitespace-nowrap">{`${label} / ${t("entry.comingSoon")}`}</span>
       </span>
     </div>
   );
 }
 
 export default function EntryHeroSection() {
+  const { t } = useLanguage();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -114,11 +111,11 @@ export default function EntryHeroSection() {
             <div className="relative h-full w-full overflow-hidden">
               <Image
                 src="/entry/hero-marisa.png"
-                alt="霧雨魔理沙"
+                alt="Marisa Kirisame"
                 fill
                 priority
                 sizes="(max-width: 1024px) 33vw, 33vw"
-                className="lg:ml-12 object-contain object-left"
+                className="object-contain object-left lg:ml-12"
               />
             </div>
           </FadeIn>
@@ -127,7 +124,7 @@ export default function EntryHeroSection() {
             <div className="relative h-full w-full overflow-hidden">
               <Image
                 src="/entry/hero-reimu.png"
-                alt="博麗霊夢"
+                alt="Reimu Hakurei"
                 fill
                 priority
                 sizes="(max-width: 1024px) 33vw, 33vw"
@@ -140,11 +137,11 @@ export default function EntryHeroSection() {
             <div className="relative h-full w-full overflow-hidden">
               <Image
                 src="/entry/hero-arice.png"
-                alt="アリス・マーガトロイド"
+                alt="Alice Margatroid"
                 fill
                 priority
                 sizes="(max-width: 1024px) 33vw, 33vw"
-                className="lg:-ml-12 object-contain object-right"
+                className="object-contain object-right lg:-ml-12"
               />
             </div>
           </FadeIn>
@@ -154,19 +151,16 @@ export default function EntryHeroSection() {
           <div className="mx-auto grid w-full grid-cols-3 gap-2 sm:grid-cols-[1fr_minmax(0,14rem)_1fr_minmax(0,14rem)_1fr_minmax(0,14rem)_1fr] sm:gap-0">
             <HeroCharacterButton
               characterId="marisa"
-              label="魔理沙"
               showAvatar
               className="w-full rounded-2xl border border-border bg-card/80 px-3 py-4 text-[12px] font-semibold text-card-foreground shadow-lg shadow-black/20 backdrop-blur hover:bg-card active:bg-card/90 sm:col-start-2 sm:px-4 sm:text-sm"
             />
             <HeroCharacterButton
               characterId="reimu"
-              label="霊夢"
               showAvatar
               className="w-full rounded-2xl border border-border bg-card/80 px-3 py-4 text-[12px] font-semibold text-card-foreground shadow-lg shadow-black/20 backdrop-blur hover:bg-card active:bg-card/90 sm:col-start-4 sm:px-4 sm:text-sm"
             />
             <HeroCharacterButton
               characterId="alice"
-              label="アリス"
               showAvatar
               className="w-full rounded-2xl border border-border bg-card/80 px-3 py-4 text-[12px] font-semibold text-card-foreground shadow-lg shadow-black/20 backdrop-blur hover:bg-card active:bg-card/90 sm:col-start-6 sm:px-4 sm:text-sm"
             />
@@ -175,33 +169,20 @@ export default function EntryHeroSection() {
 
         <div className="absolute inset-x-0 bottom-0 p-4 sm:p-6">
           <div className="hidden rounded-2xl border border-border bg-card/85 p-5 shadow-sm lg:block">
-            <div className="text-xs font-medium text-muted-foreground">
-              Touhou Talk
-            </div>
-            <h1 className="mt-2 font-gensou text-2xl tracking-wide sm:text-3xl">
-              東方キャラと“ちゃんと会話できる”体験。
-            </h1>
-            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              キャラクターを選択し、ログイン後すぐに会話を開始できます。
-            </p>
+            <div className="text-xs font-medium text-muted-foreground">Touhou Talk</div>
+            <h1 className="mt-2 font-gensou text-2xl tracking-wide sm:text-3xl">{t("entry.heroTitle")}</h1>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{t("entry.heroDescription")}</p>
           </div>
         </div>
       </div>
 
-      <div className="lg:mt-4 -mt-4 px-4 sm:px-6 lg:hidden">
+      <div className="-mt-4 px-4 sm:px-6 lg:mt-4 lg:hidden">
         <div className="rounded-2xl border border-border bg-card/90 p-5 shadow-sm">
-          <div className="text-xs font-medium text-muted-foreground">
-            Touhou Talk
-          </div>
-          <h1 className="mt-2 font-gensou text-2xl tracking-wide">
-            東方キャラと“ちゃんと会話できる”体験。
-          </h1>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            キャラクターを選択し、ログイン後すぐに会話を開始できます。
-          </p>
+          <div className="text-xs font-medium text-muted-foreground">Touhou Talk</div>
+          <h1 className="mt-2 font-gensou text-2xl tracking-wide">{t("entry.heroTitle")}</h1>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{t("entry.heroDescription")}</p>
         </div>
       </div>
     </section>
   );
 }
-
