@@ -45,9 +45,14 @@ export async function supabaseServer(): Promise<SupabaseClient> {
       },
 
       setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value, options }) => {
-          cookieStore.set(name, value, options);
-        });
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch {
+          // Server Components cannot mutate cookies.
+          // Route Handlers / Middleware will persist auth cookie updates when allowed.
+        }
       },
     },
   });
@@ -83,6 +88,12 @@ export async function getUser() {
   const { data, error } = await supabase.auth.getUser();
 
   if (error) {
+    if (
+      error.name === "AuthSessionMissingError" ||
+      String(error.message ?? "").includes("Auth session missing")
+    ) {
+      return null;
+    }
     console.error("[supabase-server] getUser error:", error);
     return null;
   }
