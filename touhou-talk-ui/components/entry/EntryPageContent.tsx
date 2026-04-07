@@ -20,6 +20,7 @@ import EntryInstallSection from "@/components/entry/entryInstall/EntryInstallSec
 import EntryFooter from "@/components/entry/entryFooter/EntryFooter";
 import EntrySelectionTracker from "@/components/entry/EntrySelectionTracker";
 import EntryPageHeader from "@/components/entry/EntryPageHeader";
+import EntryAutoRedirect from "@/components/entry/EntryAutoRedirect";
 
 function layerLabel(layer: LayerId) {
   switch (layer) {
@@ -101,7 +102,10 @@ function charactersByLocationInLayer(layer: LayerId, chars: CharacterDef[]) {
   return { ordered, others };
 }
 
-export default function EntryPageContent(props: { showHeader?: boolean }) {
+export default function EntryPageContent(props: {
+  showHeader?: boolean;
+  autoRedirectToChat?: boolean;
+}) {
   const byGroup = charactersByGroup();
   const layers: LayerId[] = ["gensokyo", "deep", "higan"];
 
@@ -142,6 +146,7 @@ export default function EntryPageContent(props: { showHeader?: boolean }) {
       className={`${styles.entryTheme} bg-background text-foreground`}
     >
       <div className="w-full max-w-6xl">
+        <EntryAutoRedirect enabled={props.autoRedirectToChat} />
         {props.showHeader ? <EntryPageHeader /> : null}
         <InViewFade reverse={true}>
           <EntryHeroSection />
