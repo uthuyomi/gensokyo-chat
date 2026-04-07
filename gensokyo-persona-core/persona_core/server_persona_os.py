@@ -689,9 +689,9 @@ def _native_attachment_max_items() -> int:
 
 def _native_attachment_max_bytes() -> int:
     try:
-        n = int(os.getenv("SIGMARIS_NATIVE_ATTACHMENT_MAX_BYTES", "1500000") or "1500000")
+        n = int(os.getenv("SIGMARIS_NATIVE_ATTACHMENT_MAX_BYTES", "8000000") or "8000000")
     except Exception:
-        n = 1500000
+        n = 8000000
     return max(1024, min(8_000_000, n))
 
 

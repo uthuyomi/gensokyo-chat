@@ -111,6 +111,16 @@ type CreateSessionResponse = {
   sessionId: string;
 };
 
+function normalizeStreamingAssistantText(text: string, opts?: { final?: boolean }) {
+  const raw = String(text ?? "").replace(/\r\n/g, "\n");
+  const trimmedTrailingSpaces = raw.replace(/[ \t]+\n/g, "\n");
+  const collapsedTail = trimmedTrailingSpaces.replace(/\n{3,}$/g, "\n\n");
+  if (opts?.final) {
+    return collapsedTail.trimEnd();
+  }
+  return collapsedTail;
+}
+
 type VscodeState =
   | "idle"
   | "analyzing"
@@ -1528,7 +1538,10 @@ export default function ChatClient() {
                 if (m.id !== aiId) return m;
                 const prevText = typeof m.content === "string" ? m.content : "";
                 const base = prevText === "..." ? "" : prevText;
-                return { ...m, content: base + delta };
+                return {
+                  ...m,
+                  content: normalizeStreamingAssistantText(base + delta),
+                };
               }),
             };
           });
@@ -1536,6 +1549,9 @@ export default function ChatClient() {
 
         const finalize = (finalText: string, meta: unknown) => {
           const speakerId = inferSpeakerCharacterId(meta, activeCharacterId);
+          const normalizedFinalText = normalizeStreamingAssistantText(finalText, {
+            final: true,
+          });
           setMessagesBySession((prev) => {
             const list = prev[activeSessionId] ?? [];
             return {
@@ -1544,7 +1560,7 @@ export default function ChatClient() {
                 m.id === aiId
                   ? {
                       ...m,
-                      content: finalText,
+                      content: normalizedFinalText,
                       speakerId: speakerId ?? undefined,
                       meta:
                         meta && typeof meta === "object" && !Array.isArray(meta)

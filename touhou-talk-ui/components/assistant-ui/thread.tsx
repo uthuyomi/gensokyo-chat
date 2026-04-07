@@ -318,16 +318,56 @@ const UserMessagePersistedUploads: FC = () => {
 
 export const Thread: FC = () => {
   const desktopTtsState = useDesktopTtsState();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const footerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    const footer = footerRef.current;
+    if (!root || !footer || typeof window === "undefined") return;
+
+    const updateFooterOffset = () => {
+      const rect = footer.getBoundingClientRect();
+      const footerHeight = Math.max(0, Math.ceil(rect.height));
+      const cushion = 12;
+      root.style.setProperty(
+        "--thread-footer-offset",
+        `${footerHeight + cushion}px`,
+      );
+    };
+
+    updateFooterOffset();
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => updateFooterOffset())
+        : null;
+
+    resizeObserver?.observe(footer);
+    window.addEventListener("resize", updateFooterOffset);
+    window.visualViewport?.addEventListener("resize", updateFooterOffset);
+    window.visualViewport?.addEventListener("scroll", updateFooterOffset);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateFooterOffset);
+      window.visualViewport?.removeEventListener("resize", updateFooterOffset);
+      window.visualViewport?.removeEventListener("scroll", updateFooterOffset);
+    };
+  }, []);
+
   return (
     <ThreadPrimitive.Root
+      ref={rootRef}
       className="aui-root aui-thread-root @container flex h-full flex-col bg-transparent"
       style={{
         ["--thread-max-width" as string]: "44rem",
+        ["--thread-footer-offset" as string]: "7rem",
       }}
     >
       <ThreadPrimitive.Viewport
         turnAnchor="top"
-        className="aui-thread-viewport relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth px-4 pt-4 max-lg:pb-[calc(12rem+var(--app-vvb,0px))]"
+        className="aui-thread-viewport relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth px-4 pt-4 pb-[var(--thread-footer-offset,7rem)] max-lg:pb-[calc(var(--thread-footer-offset,7rem)+var(--app-vvb,0px))]"
       >
         <DesktopTtsStateContext.Provider value={desktopTtsState}>
         <AuiIf condition={(s) => s.thread.isEmpty}>
@@ -344,6 +384,7 @@ export const Thread: FC = () => {
         </DesktopTtsStateContext.Provider>
 
         <ThreadPrimitive.ViewportFooter
+          ref={footerRef}
           className="aui-thread-viewport-footer sticky bottom-0 mx-auto mt-auto flex w-full max-w-(--thread-max-width) flex-col gap-4 overflow-visible rounded-t-3xl bg-transparent pb-4 md:pb-6 max-lg:fixed max-lg:left-1/2 max-lg:bottom-[calc(var(--app-vvb,0px)+env(safe-area-inset-bottom))] max-lg:z-40 max-lg:w-[calc(100%-2rem)] max-lg:max-w-(--thread-max-width) max-lg:-translate-x-1/2 max-lg:px-0 max-lg:pb-4 max-lg:bg-transparent max-lg:backdrop-blur-0"
         >
           <ThreadScrollToBottom />
