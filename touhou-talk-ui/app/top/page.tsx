@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 
 import { supabaseBrowser } from "@/lib/supabaseClient";
-import { getSkipMapOnStart } from "@/lib/touhou-settings";
 import TopShell from "@/components/top/TopShell";
 import { useLanguage } from "@/components/i18n/LanguageProvider";
 
@@ -35,13 +34,6 @@ export default function TopPage() {
       listener.subscription.unsubscribe();
     };
   }, []);
-
-  useEffect(() => {
-    if (!authChecked) return;
-    if (!user) return;
-    if (!getSkipMapOnStart()) return;
-    enter();
-  }, [authChecked, user]);
 
   const lines = useMemo(() => tList("top.lines"), [tList]);
   const fullText = useMemo(() => lines.join("\n"), [lines]);
@@ -82,8 +74,7 @@ export default function TopPage() {
     setFog(true);
     setLoading(true);
     window.setTimeout(() => {
-      const skip = getSkipMapOnStart();
-      router.push(skip ? "/chat/session" : "/map/session/gensokyo");
+      router.push("/chat/session");
     }, 1200);
   };
 

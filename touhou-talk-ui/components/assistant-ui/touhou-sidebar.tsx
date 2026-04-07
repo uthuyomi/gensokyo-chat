@@ -1,11 +1,13 @@
 ﻿"use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   Check,
   ChevronLeft,
   ChevronRight,
   Download,
+  House,
   ImageUp,
   MessageSquareText,
   Search,
@@ -438,8 +440,19 @@ export function TouhouSidebar({
           </div>
           <div className="rounded-2xl border border-sidebar-border/70 bg-sidebar-accent/20 px-3 py-3">
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
+              <div className="min-w-0 flex items-center gap-2">
                 <h1 className="font-gensou text-lg tracking-wide text-sidebar-foreground">Gensokyo Chat</h1>
+                <TooltipIconButton
+                  tooltip={copy.top}
+                  variant="outline"
+                  size="icon-sm"
+                  className="rounded-xl border-sidebar-border bg-sidebar-accent/35 hover:bg-sidebar-accent"
+                  asChild
+                >
+                  <Link href="/entry?from=chat" aria-label={copy.top}>
+                    <House className="size-4" />
+                  </Link>
+                </TooltipIconButton>
               </div>
 
             </div>

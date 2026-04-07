@@ -253,9 +253,11 @@ export async function updateRelationshipAndMemoryBestEffort(params: {
   chatMode: TouhouChatMode;
   userText: string;
   assistantText: string;
+  shouldUpdate?: boolean;
 }) {
   const enabled = envFlag("TOUHOU_RELATIONSHIP_ENABLED", true);
   if (!enabled) return;
+  if (params.shouldUpdate === false) return;
   const memScopeKey = `char:${params.characterId}`;
 
   const confThreshold = clampNum(

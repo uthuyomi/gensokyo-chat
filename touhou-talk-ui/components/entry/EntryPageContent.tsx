@@ -19,6 +19,7 @@ import EntryCharactersHeader from "@/components/entry/entryCharacters/EntryChara
 import EntryInstallSection from "@/components/entry/entryInstall/EntryInstallSection";
 import EntryFooter from "@/components/entry/entryFooter/EntryFooter";
 import EntrySelectionTracker from "@/components/entry/EntrySelectionTracker";
+import EntryPageHeader from "@/components/entry/EntryPageHeader";
 
 function layerLabel(layer: LayerId) {
   switch (layer) {
@@ -100,7 +101,7 @@ function charactersByLocationInLayer(layer: LayerId, chars: CharacterDef[]) {
   return { ordered, others };
 }
 
-export default function EntryPageContent() {
+export default function EntryPageContent(props: { showHeader?: boolean }) {
   const byGroup = charactersByGroup();
   const layers: LayerId[] = ["gensokyo", "deep", "higan"];
 
@@ -141,6 +142,7 @@ export default function EntryPageContent() {
       className={`${styles.entryTheme} bg-background text-foreground`}
     >
       <div className="w-full max-w-6xl">
+        {props.showHeader ? <EntryPageHeader /> : null}
         <InViewFade reverse={true}>
           <EntryHeroSection />
         </InViewFade>
