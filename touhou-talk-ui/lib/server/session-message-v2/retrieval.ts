@@ -192,6 +192,26 @@ export async function uploadFilesForSdk(params: {
         const attachmentId = typeof upJson?.attachment_id === "string" ? upJson.attachment_id : null;
         if (!attachmentId) return null;
 
+        const parsed = await coreJson<{ ok?: boolean; kind?: unknown; parsed?: unknown }>({
+          url: `${params.base}/io/parse`,
+          accessToken: params.accessToken,
+          body: { attachment_id: attachmentId, kind: null },
+        });
+        const kind = typeof parsed.json?.kind === "string" ? parsed.json.kind : guessUploadKind(file);
+        const parsedAny = parsed.json?.parsed as Record<string, unknown> | null | undefined;
+        const excerptCandidate =
+          typeof parsedAny?.raw_excerpt === "string"
+            ? parsedAny.raw_excerpt
+            : typeof parsedAny?.text_excerpt === "string"
+              ? parsedAny.text_excerpt
+              : typeof parsedAny?.content_summary === "string"
+                ? parsedAny.content_summary
+                : typeof parsedAny?.excerpt_summary === "string"
+                  ? parsedAny.excerpt_summary
+                  : parsedAny?.ocr && typeof parsedAny.ocr === "object" && parsedAny.ocr !== null && typeof (parsedAny.ocr as Record<string, unknown>).detected_text === "string"
+                    ? String((parsedAny.ocr as Record<string, unknown>).detected_text)
+                    : "";
+
         return {
           type: "upload",
           attachment_id: attachmentId,
@@ -200,7 +220,8 @@ export async function uploadFilesForSdk(params: {
             typeof upJson?.mime_type === "string"
               ? upJson.mime_type
               : (file.type || "application/octet-stream"),
-          kind: guessUploadKind(file),
+          kind,
+          parsed_excerpt: excerptCandidate ? clampText(String(excerptCandidate), 1200) : undefined,
         };
       } catch {
         return null;
