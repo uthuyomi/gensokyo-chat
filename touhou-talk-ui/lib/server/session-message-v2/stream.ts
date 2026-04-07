@@ -53,6 +53,8 @@ export async function handleStreamSessionMessage(params: {
   gen: ReturnType<typeof import("@/lib/touhouPersona").genParamsFor>;
   intent: PersonaIntentResponse | null;
   isSeedTurn: boolean;
+  shouldGenerateTtsReading: boolean;
+  shouldUpdateRelationship: boolean;
 }) {
   const enrichedGen = {
     ...params.gen,
@@ -283,10 +285,12 @@ export async function handleStreamSessionMessage(params: {
                 });
               }
 
-              const ttsReading = await generateTtsReadingText({
-                characterId: params.characterId,
-                replyText: replyFinal,
-              });
+              const ttsReading = params.shouldGenerateTtsReading
+                ? await generateTtsReadingText({
+                    characterId: params.characterId,
+                    replyText: replyFinal,
+                  })
+                : { readingText: null, model: null };
               finalMeta = withTtsReadingMeta(
                 finalMeta,
                 ttsReading.readingText,
@@ -387,6 +391,7 @@ export async function handleStreamSessionMessage(params: {
           chatMode: params.chatMode,
           userText: params.text,
           assistantText: replyGuarded,
+          shouldUpdate: params.shouldUpdateRelationship,
         });
       });
     }

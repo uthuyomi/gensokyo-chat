@@ -74,6 +74,8 @@ import { buildSessionMessageContext } from "@/lib/server/session-message-v2/cont
 import { handleNonStreamSessionMessage } from "@/lib/server/session-message-v2/respond";
 
 import { handleStreamSessionMessage } from "@/lib/server/session-message-v2/stream";
+import { isDesktopRuntimeEnabled } from "@/lib/desktop/desktopPaths";
+import { loadCharacterSettings } from "@/lib/desktop/desktopSettingsStore";
 import {
   chooseGroupSpeaker,
   findMentionedGroupSpeakerIds,
@@ -162,6 +164,42 @@ function shouldLoadWorldOverlay(params: {
   return params.chatMode === "roleplay";
 }
 
+async function shouldGenerateDesktopTtsReading(params: {
+  req: NextRequest;
+  characterId: string;
+}) {
+  const ua = String(params.req.headers.get("user-agent") ?? "");
+  if (!ua.includes("Electron")) return false;
+  if (!isDesktopRuntimeEnabled()) return false;
+
+  try {
+    const settings = await loadCharacterSettings(params.characterId);
+    if (!settings) return false;
+    const mode = settings.tts?.mode ?? "none";
+    if (mode === "browser") return true;
+    if (mode === "aquestalk") return !!settings.tts?.aquestalk?.enabled;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function lastAssistantAskedQuestion(
+  history: Array<{ role: "user" | "assistant"; content: string }>,
+) {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const item = history[i];
+    if (item?.role !== "assistant") continue;
+    return /[?\uFF1F]\s*$/u.test(String(item.content ?? "").trim());
+  }
+  return false;
+}
+
+function containsAnyCue(text: string, needles: string[]) {
+  const normalized = String(text ?? "").toLowerCase();
+  return needles.some((needle) => normalized.includes(needle.toLowerCase()));
+}
+
 function shouldFetchDirectorIntentForTurn(params: {
   characterId: string;
   chatMode: TouhouChatMode;
@@ -169,6 +207,7 @@ function shouldFetchDirectorIntentForTurn(params: {
   text: string;
   fileCount: number;
   urlCount: number;
+  history: Array<{ role: "user" | "assistant"; content: string }>;
 }) {
   if (
     !shouldUseDirectorOverlay({
@@ -187,11 +226,162 @@ function shouldFetchDirectorIntentForTurn(params: {
   if (mode === "always") return true;
 
   const text = String(params.text ?? "").trim();
+  if (!text) return false;
   if (params.isSeedTurn) return true;
   if (params.fileCount > 0 || params.urlCount > 0) return true;
-  if (text.length <= 240) return true;
-  if (/[?？]\s*$/.test(text)) return true;
-  return false;
+  if (text.length <= 24) return true;
+  if (/[?\uFF1F]\s*$/u.test(text)) return true;
+  if (lastAssistantAskedQuestion(params.history) && text.length <= 120) return true;
+  return containsAnyCue(text, [
+    "\u3069\u3046\u3059\u308b",
+    "\u3069\u3046\u3057\u3088\u3046",
+    "\u3069\u3046\u3057\u305f\u3089",
+    "\u3069\u3046\u3059\u308c\u3070",
+    "\u3069\u3063\u3061",
+    "\u3069\u308c",
+    "\u3069\u306e",
+    "\u3053\u308c\u3067\u3044\u3044",
+    "\u4efb\u305b\u308b",
+    "\u304a\u307e\u304b\u305b",
+    "\u304a\u3059\u3059\u3081",
+    "\u8ff7\u3063\u3066\u308b",
+    "\u8ff7\u3046",
+    "\u7d9a\u304d",
+    "\u6b21\u306f",
+    "help me choose",
+    "which one",
+    "what should",
+  ]);
+}
+
+function isHighSignalRelationshipTurn(params: {
+  text: string;
+  chatMode: TouhouChatMode;
+  fileCount: number;
+  urlCount: number;
+}) {
+  const text = String(params.text ?? "").trim();
+  if (!text) return false;
+  if (params.fileCount > 0 || params.urlCount > 0) return true;
+  if (text.length >= 180) return true;
+  if (params.chatMode === "roleplay" && text.length >= 120) return true;
+  return containsAnyCue(text, [
+    "\u76f8\u8ac7",
+    "\u60a9",
+    "\u56f0\u3063\u3066",
+    "\u3064\u3089",
+    "\u8f9b\u3044",
+    "\u3057\u3093\u3069",
+    "\u4e0d\u5b89",
+    "\u6016",
+    "\u60b2",
+    "\u6012",
+    "\u5bc2",
+    "\u5b09",
+    "\u52a9\u3051\u3066",
+    "\u3042\u308a\u304c\u3068\u3046",
+    "\u3054\u3081\u3093",
+    "\u597d\u304d",
+    "\u5acc\u3044",
+    "\u4fe1\u3058",
+    "\u5927\u4e8b",
+    "help",
+    "thanks",
+    "sorry",
+    "love",
+    "hate",
+    "anxious",
+    "upset",
+    "sad",
+  ]);
+}
+
+function shouldUpdateRelationshipForTurn(params: {
+  chatMode: TouhouChatMode;
+  isSeedTurn: boolean;
+  text: string;
+  coreHistory: Array<{ role: "user" | "assistant"; content: string }>;
+  fileCount: number;
+  urlCount: number;
+}) {
+  const mode = String(
+    process.env.TOUHOU_RELATIONSHIP_UPDATE_MODE ?? "important_or_cadence",
+  )
+    .trim()
+    .toLowerCase();
+  if (mode === "off") return false;
+  if (mode === "always") return true;
+  if (params.isSeedTurn) return false;
+  if (
+    isHighSignalRelationshipTurn({
+      text: params.text,
+      chatMode: params.chatMode,
+      fileCount: params.fileCount,
+      urlCount: params.urlCount,
+    })
+  ) {
+    return true;
+  }
+
+  const cadenceRaw = Number(process.env.TOUHOU_RELATIONSHIP_UPDATE_CADENCE ?? "4");
+  const cadence = Number.isFinite(cadenceRaw)
+    ? Math.max(2, Math.min(8, Math.trunc(cadenceRaw)))
+    : 4;
+  const completedAssistantTurns = params.coreHistory.filter(
+    (item) => item.role === "assistant",
+  ).length;
+  const nextAssistantTurn = completedAssistantTurns + 1;
+  return nextAssistantTurn % cadence === 0;
+}
+
+function shouldAutoBrowseForTurn(params: {
+  text: string;
+  chatMode: TouhouChatMode;
+  fileCount: number;
+  urlCount: number;
+}) {
+  if (params.fileCount > 0 || params.urlCount > 0) return false;
+  const text = String(params.text ?? "").trim();
+  if (text.length < 8) return false;
+  const explicitResearchCue = containsAnyCue(text, [
+    "\u8abf\u3079\u3066",
+    "\u691c\u7d22",
+    "\u691c\u7d22\u3057\u3066",
+    "\u63a2\u3057\u3066",
+    "\u78ba\u8a8d\u3057\u3066",
+    "\u88cf\u53d6\u308a",
+    "\u51fa\u5178",
+    "\u30bd\u30fc\u30b9",
+    "\u6700\u65b0",
+    "\u30cb\u30e5\u30fc\u30b9",
+    "\u73fe\u72b6",
+    "\u6bd4\u8f03\u3057\u3066",
+    "web\u3067",
+    "\u30d6\u30e9\u30a6\u30b6\u3067",
+    "look up",
+    "search",
+    "verify",
+    "source",
+    "latest",
+    "news",
+  ]);
+  if (!explicitResearchCue) return false;
+  if (
+    params.chatMode === "roleplay" &&
+    !containsAnyCue(text, [
+      "\u8abf\u3079\u3066",
+      "\u691c\u7d22",
+      "\u6700\u65b0",
+      "\u30cb\u30e5\u30fc\u30b9",
+      "look up",
+      "search",
+      "latest",
+      "news",
+    ])
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function isRecordValue(value: unknown): value is Record<string, unknown> {
@@ -305,10 +495,20 @@ function shouldAutoGroupBanter(params: {
   mentionedCharacterIds: string[];
 }) {
   if (params.participants.length < 2) return false;
-  if (params.mentionedCharacterIds.length >= 1) return true;
-  const text = String(params.text ?? "").trim().toLowerCase();
+  const text = String(params.text ?? "").trim();
   if (!text) return false;
-  const banterKeywords = [
+  const hasGroupCue = containsAnyCue(text, [
+    "\u307f\u3093\u306a\u3067",
+    "\u7686\u3067",
+    "\u5168\u54e1",
+    "\u4e8c\u4eba\u3067",
+    "3\u4eba\u3067",
+    "\u304a\u4e92\u3044",
+    "\u639b\u3051\u5408\u3044",
+    "\u4f1a\u8a71\u3057\u3066",
+    "\u8a71\u3057\u5408\u3063\u3066",
+    "\u305d\u308c\u305e\u308c",
+    "\u307f\u3093\u306a",
     "all of you",
     "both of you",
     "talk to each other",
@@ -318,8 +518,30 @@ function shouldAutoGroupBanter(params: {
     "together",
     "group",
     "banter",
-  ];
-  return banterKeywords.some((keyword) => text.includes(keyword));
+  ]);
+  if (params.mentionedCharacterIds.length >= 2) return true;
+  if (params.mentionedCharacterIds.length >= 1) return hasGroupCue;
+  return hasGroupCue;
+}
+
+function resolveAutoGroupTurnCount(params: {
+  text: string;
+  history: Array<{ role: "user" | "assistant"; content: string }>;
+  aiCount: number;
+  mentionedCharacterIds: string[];
+}) {
+  if (
+    params.aiCount >= 3 &&
+    params.mentionedCharacterIds.length >= 2 &&
+    shouldAddThirdSpeaker({
+      text: params.text,
+      history: params.history,
+      aiCount: params.aiCount,
+    })
+  ) {
+    return 3;
+  }
+  return 2;
 }
 
 function buildSceneSpeakerPlan(params: {
@@ -627,6 +849,14 @@ export async function runLegacySessionMessageRoute(
       participants: roomAiParticipants,
       mentionedCharacterIds: mentionedSpeakerIds,
     });
+  const autoGroupTurnCount = shouldRunAutoGroupBanter
+    ? resolveAutoGroupTurnCount({
+        text,
+        history: coreHistory,
+        aiCount: roomAiParticipants.length,
+        mentionedCharacterIds: mentionedSpeakerIds,
+      })
+    : 0;
 
   if (roomSpeaker.roomMetaPatch) {
     void supabaseAdmin()
@@ -655,7 +885,7 @@ export async function runLegacySessionMessageRoute(
           conv && typeof (conv as Record<string, unknown>).location === "string"
             ? String((conv as Record<string, unknown>).location)
             : null,
-        turnCount: isSceneContinuation ? sceneTurnCount : Math.max(2, Math.min(3, mentionedSpeakerIds.length >= 2 ? 3 : 2)),
+        turnCount: isSceneContinuation ? sceneTurnCount : autoGroupTurnCount,
         sourceText: text,
         preferredFirstSpeakerCharacterId: mentionedSpeakerIds[0] ?? selectedCharacterId,
         openingAddressesUser: !isSceneContinuation,
@@ -719,6 +949,10 @@ export async function runLegacySessionMessageRoute(
       ? String((conv as Record<string, unknown>).location)
       : null;
   const isSeedTurn = isFirstAssistantTurn(coreHistory);
+  const shouldGenerateTtsReading = await shouldGenerateDesktopTtsReading({
+    req,
+    characterId: selectedCharacterId,
+  });
   const shouldLoadRelationship = shouldLoadRelationshipOverlay({
     enabled: relationshipEnabled,
     chatMode,
@@ -735,6 +969,15 @@ export async function runLegacySessionMessageRoute(
     chatMode,
     isSeedTurn,
     text,
+    fileCount: files.length,
+    urlCount: urls.length,
+    history: coreHistory,
+  });
+  const shouldUpdateRelationship = shouldUpdateRelationshipForTurn({
+    chatMode,
+    isSeedTurn,
+    text,
+    coreHistory,
     fileCount: files.length,
     urlCount: urls.length,
   });
@@ -762,8 +1005,13 @@ export async function runLegacySessionMessageRoute(
         })
       : Promise.resolve(null);
   const uploadsEnabled = true;
-  const linkAnalysisEnabled = true;
-  const autoBrowseEnabled = true;
+  const linkAnalysisEnabled = urls.length > 0;
+  const autoBrowseEnabled = shouldAutoBrowseForTurn({
+    text,
+    chatMode,
+    fileCount: files.length,
+    urlCount: urls.length,
+  });
 
   const uploadsPromise = uploadsEnabled
     ? uploadFilesForSdk({ base, accessToken, files })
@@ -911,6 +1159,7 @@ export async function runLegacySessionMessageRoute(
       chatMode,
       userText: text,
       assistantText: replyFinal,
+      shouldUpdate: shouldUpdateRelationship,
     });
 
     if (!streamMode) {
@@ -994,6 +1243,8 @@ export async function runLegacySessionMessageRoute(
       gen,
       intent,
       isSeedTurn,
+      shouldGenerateTtsReading,
+      shouldUpdateRelationship,
     });
   }
   return handleStreamSessionMessage({
@@ -1012,5 +1263,7 @@ export async function runLegacySessionMessageRoute(
     gen,
     intent,
     isSeedTurn,
+    shouldGenerateTtsReading,
+    shouldUpdateRelationship,
   });
 }

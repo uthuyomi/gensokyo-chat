@@ -35,7 +35,7 @@ function HeroCharacterButton({
   className?: string;
   showAvatar?: boolean;
 }) {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const ch: CharacterDef | undefined = CHARACTERS[characterId];
   const selectable = isCharacterSelectable(ch);
   const nextPath = buildNextPathForCharacterId(characterId);
@@ -50,7 +50,7 @@ function HeroCharacterButton({
           <Image src={avatarSrc} alt="" fill className="object-cover" />
         </span>
       ) : null}
-      <span className="text-center leading-tight">{`${t("entry.talkWith")} ${label}`}</span>
+      <span className="text-center leading-tight">{lang === "ja" ? `${label}と話す` : `${t("entry.talkWith")} ${label}`}</span>
     </span>
   );
 
