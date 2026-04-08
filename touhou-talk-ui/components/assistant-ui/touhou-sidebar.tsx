@@ -289,10 +289,10 @@ function CharacterPickerDialog(props: {
         <DialogHeader className="border-b border-border/60 px-6 pb-4 pt-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0 flex-1 pr-4">
-              <DialogTitle className="flex items-center gap-2 text-xl"><UserRoundPlus className="size-5" /><span>{mode === "room" ? copy.titleRoom : copy.titleSingle}</span></DialogTitle>
-              <DialogDescription className="hidden max-w-3xl leading-6 lg:block">{mode === "room" ? copy.descRoom : copy.descSingle}</DialogDescription>
+              <DialogTitle className="flex items-center gap-2 text-xl"><UserRoundPlus className="size-5" /><span>{copy.createConversation}</span></DialogTitle>
+              <DialogDescription className="hidden">{mode === "room" ? copy.descRoom : copy.descSingle}</DialogDescription>
             </div>
-            <div className="hidden rounded-2xl border border-border/70 bg-muted/35 p-1 lg:inline-flex">
+            <div className="hidden rounded-2xl border border-border/70 bg-muted/35 p-1">
               <button type="button" onClick={() => setMode("single")} className={cn("inline-flex min-w-[120px] items-center justify-center rounded-xl px-4 py-2 text-sm transition", mode === "single" ? "bg-background shadow-sm" : "text-muted-foreground")}>{copy.single}</button>
               <button type="button" onClick={() => setMode("room")} className={cn("inline-flex min-w-[120px] items-center justify-center gap-1 rounded-xl px-4 py-2 text-sm transition", mode === "room" ? "bg-background shadow-sm" : "text-muted-foreground")}><Users className="size-4" /><span>{copy.room}</span></button>
             </div>
@@ -301,7 +301,7 @@ function CharacterPickerDialog(props: {
 
         <div className="max-h-[78vh] overflow-auto px-6 py-5">
           <div className="mx-auto w-full max-w-[1160px]">
-          <div className="mb-5 hidden gap-3 md:grid-cols-3 lg:grid">
+          <div className="mb-5 hidden gap-3 md:grid-cols-3">
             {stepLabels.map((label, index) => {
               const current = index + 1;
               const active = current === step;
