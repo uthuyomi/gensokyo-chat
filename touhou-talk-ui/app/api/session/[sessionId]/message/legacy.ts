@@ -56,7 +56,10 @@ import {
   saveStateSnapshot,
 } from "@/lib/server/session-message-v2/persistence";
 
-import { parseSessionMessageRequestBody } from "@/lib/server/session-message-v2/request-body";
+import {
+  buildImplicitAttachmentMessage,
+  parseSessionMessageRequestBody,
+} from "@/lib/server/session-message-v2/request-body";
 
 import {
   loadRelationshipAndMemoryBestEffort,
@@ -806,7 +809,16 @@ export async function runLegacySessionMessageRoute(
     return parsed;
   }
   
-  const { characterId, text, coreModeRaw, sceneMode, sceneTurnCount, files, urls } = parsed;
+  const {
+    characterId,
+    text: rawText,
+    coreModeRaw,
+    sceneMode,
+    sceneTurnCount,
+    files,
+    urls,
+  } = parsed;
+  const text = rawText.trim() ? rawText : buildImplicitAttachmentMessage(files);
 
   const loaded = await buildSessionMessageContext({ context, coreModeRaw });
 
@@ -1040,7 +1052,7 @@ export async function runLegacySessionMessageRoute(
     supabase,
     sessionId,
     userId,
-    content: text,
+    content: rawText,
     phase04Uploads,
     phase04Links,
   });
