@@ -366,7 +366,7 @@ export const Thread: FC = () => {
       }}
     >
       <ThreadPrimitive.Viewport
-        className="aui-thread-viewport relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth px-4 pt-4 pb-[var(--thread-footer-offset,7rem)] max-lg:pb-[calc(var(--thread-footer-offset,7rem)+var(--app-vvb,0px))]"
+        className="aui-thread-viewport relative flex flex-1 flex-col overflow-x-auto overflow-y-scroll scroll-smooth px-4 pt-4 pb-6 max-lg:pb-[calc(var(--thread-footer-offset,7rem)+var(--app-vvb,0px))]"
       >
         <DesktopTtsStateContext.Provider value={desktopTtsState}>
         <AuiIf condition={(s) => s.thread.isEmpty}>
