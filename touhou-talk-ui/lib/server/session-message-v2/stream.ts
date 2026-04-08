@@ -342,16 +342,15 @@ export async function handleStreamSessionMessage(params: {
         });
 
       } catch (e) {
-        console.warn("[touhou] persist ai message failed:", e);
+        console.warn("[touhou] sanitize final stream reply failed:", e);
       }
 
       try {
-        await writer.close();
-      } catch {
-        // ignore
-      }
+        console.info("[touhou] persist ai message start:", {
+          sessionId: params.sessionId,
+          characterId: params.characterId,
+        });
 
-      runPostReplyTasks(async () => {
         const aiInsertError = await saveAssistantMessage({
           supabase: params.supabase,
           sessionId: params.sessionId,
@@ -363,8 +362,27 @@ export async function handleStreamSessionMessage(params: {
 
         if (aiInsertError) {
           console.warn("[touhou] persist ai message failed:", aiInsertError);
+          await writer.write(
+            toSse("error", { error: "Failed to persist ai message" }),
+          );
+        } else {
+          console.info("[touhou] persist ai message success:", {
+            sessionId: params.sessionId,
+            characterId: params.characterId,
+          });
         }
+      } catch (e) {
+        console.warn("[touhou] persist ai message crashed:", e);
+        try {
+          await writer.write(
+            toSse("error", { error: "AI message persistence crashed" }),
+          );
+        } catch {
+          // ignore
+        }
+      }
 
+      runPostReplyTasks(async () => {
         if (isRecord(finalMeta)) {
           const snapshotError = await saveStateSnapshot({
             supabase: params.supabase,
@@ -394,6 +412,12 @@ export async function handleStreamSessionMessage(params: {
           shouldUpdate: params.shouldUpdateRelationship,
         });
       });
+
+      try {
+        await writer.close();
+      } catch {
+        // ignore
+      }
     }
   })();
 
