@@ -21,7 +21,6 @@ import {
   DialogContent,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { TooltipIconButton } from "@/components/assistant-ui/tooltip-icon-button";
 import { cn } from "@/lib/utils";
 
@@ -103,21 +102,46 @@ const AttachmentPreviewDialog: FC<PropsWithChildren> = ({ children }) => {
   );
 };
 
-const AttachmentThumb: FC = () => {
+const AttachmentThumb: FC<{ isComposer: boolean }> = ({ isComposer }) => {
   const isImage = useAuiState((s) => s.attachment.type === "image");
   const src = useAttachmentSrc();
 
-  return (
-    <Avatar className="aui-attachment-tile-avatar h-full w-full rounded-none">
-      <AvatarImage
+  if (isImage && src) {
+    if (isComposer) {
+      return (
+        <div className="relative h-full w-full overflow-hidden rounded-[inherit]">
+          <img
+            src={src}
+            alt="Attachment preview"
+            className="aui-attachment-tile-image absolute inset-0 m-auto max-h-full max-w-full object-contain"
+          />
+        </div>
+      );
+    }
+
+    return (
+      <img
         src={src}
         alt="Attachment preview"
-        className="aui-attachment-tile-image object-cover"
+        className={cn(
+          "aui-attachment-tile-image block rounded-[inherit] object-contain",
+          "h-auto w-auto max-h-[24rem] max-w-[33rem]",
+        )}
       />
-      <AvatarFallback delayMs={isImage ? 200 : 0}>
+    );
+  }
+
+  return (
+    <div className="aui-attachment-tile-fallback flex h-full w-full items-center justify-center">
+      <div
+        className={cn(
+          "flex items-center justify-center rounded-[inherit] bg-transparent text-muted-foreground",
+          isComposer ? "h-16 w-16" : "h-20 w-20",
+        )}
+      >
         <FileText className="aui-attachment-tile-fallback-icon size-8 text-muted-foreground" />
-      </AvatarFallback>
-    </Avatar>
+      </div>
+    </div>
   );
 };
 
@@ -145,24 +169,30 @@ const AttachmentUI: FC = () => {
     <Tooltip>
       <AttachmentPrimitive.Root
         className={cn(
-          "aui-attachment-root relative",
-          isImage &&
-            "aui-attachment-root-composer only:[&>#attachment-tile]:size-24",
+          "aui-attachment-root relative inline-flex shrink-0",
+          isImage && isComposer && "aui-attachment-root-composer",
         )}
       >
         <AttachmentPreviewDialog>
           <TooltipTrigger asChild>
             <div
               className={cn(
-                "aui-attachment-tile size-14 cursor-pointer overflow-hidden rounded-[14px] border bg-muted transition-opacity hover:opacity-75",
+                "aui-attachment-tile flex cursor-pointer items-center justify-center overflow-hidden rounded-[14px] border bg-muted transition-opacity hover:opacity-75",
                 isComposer &&
                   "aui-attachment-tile-composer border-foreground/20",
+                isImage
+                  ? isComposer
+                    ? "h-[64px] w-[96px] px-1.5 py-1"
+                    : "min-h-[96px] min-w-[144px] max-w-[33rem] px-2 py-2"
+                  : isComposer
+                    ? "h-14 w-14"
+                    : "h-16 w-16",
               )}
               role="button"
               id="attachment-tile"
               aria-label={`${typeLabel} attachment`}
             >
-              <AttachmentThumb />
+              <AttachmentThumb isComposer={isComposer} />
             </div>
           </TooltipTrigger>
         </AttachmentPreviewDialog>
@@ -191,7 +221,7 @@ const AttachmentRemove: FC = () => {
 
 export const UserMessageAttachments: FC = () => {
   return (
-    <div className="aui-user-message-attachments-end col-span-full col-start-1 row-start-1 flex w-full flex-row justify-end gap-2">
+    <div className="aui-user-message-attachments-end flex w-fit max-w-full flex-row flex-wrap justify-end gap-2 self-end">
       <MessagePrimitive.Attachments components={{ Attachment: AttachmentUI }} />
     </div>
   );
