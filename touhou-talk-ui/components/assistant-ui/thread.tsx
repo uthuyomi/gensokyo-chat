@@ -481,8 +481,45 @@ const ThreadSuggestionItem: FC = () => {
   );
 };
 
+function useMobileKeyboardSubmitDisabled(): boolean {
+  const [disabled, setDisabled] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof navigator === "undefined") return;
+
+    const compute = () => {
+      const ua = String(navigator.userAgent ?? "").toLowerCase();
+      const uaMobile =
+        /android|iphone|ipad|ipod|mobile/i.test(ua);
+      const coarse =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(pointer: coarse)").matches;
+      const touchPoints =
+        typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 0;
+
+      setDisabled(Boolean(uaMobile || (coarse && touchPoints)));
+    };
+
+    compute();
+
+    if (typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(pointer: coarse)");
+    const onChange = () => compute();
+    try {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    } catch {
+      mq.addListener(onChange);
+      return () => mq.removeListener(onChange);
+    }
+  }, []);
+
+  return disabled;
+}
+
 const Composer: FC = () => {
   const { lang } = useLanguage();
+  const disableKeyboardSubmit = useMobileKeyboardSubmitDisabled();
   return (
     <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
       <ComposerPrimitive.AttachmentDropzone className="aui-composer-attachment-dropzone flex w-full flex-col rounded-[28px] border border-input/80 bg-background/92 px-1 pt-2 shadow-sm outline-none backdrop-blur transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
@@ -493,6 +530,8 @@ const Composer: FC = () => {
           rows={1}
           autoFocus
           aria-label={lang === "ja" ? "\u30e1\u30c3\u30bb\u30fc\u30b8\u5165\u529b" : "Message input"}
+          submitMode={disableKeyboardSubmit ? "none" : "enter"}
+          enterKeyHint={disableKeyboardSubmit ? "enter" : "send"}
         />
         <ComposerAction />
       </ComposerPrimitive.AttachmentDropzone>
