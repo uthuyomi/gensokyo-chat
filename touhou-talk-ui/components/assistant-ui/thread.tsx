@@ -531,7 +531,6 @@ const Composer: FC = () => {
           autoFocus
           aria-label={lang === "ja" ? "\u30e1\u30c3\u30bb\u30fc\u30b8\u5165\u529b" : "Message input"}
           submitMode={disableKeyboardSubmit ? "none" : "enter"}
-          enterKeyHint={disableKeyboardSubmit ? "enter" : "send"}
         />
         <ComposerAction />
       </ComposerPrimitive.AttachmentDropzone>
