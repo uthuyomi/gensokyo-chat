@@ -64,6 +64,15 @@ function extractTextForTts(content: unknown): string {
 
 type DesktopTtsState = { speaking: boolean; characterId: string; messageId: string } | null;
 
+function isParserImageSummary(text: string): boolean {
+  const value = String(text ?? "").trim();
+  if (!value) return false;
+  return (
+    /^Image contains\s+\d+\s+dominant color clusters(?:\s+with\s+edge_dens(?:ity)?[≈=][^.\n]+\.?)?$/i.test(value) ||
+    /^Image contains\s+\d+\s+dominant color clusters/i.test(value)
+  );
+}
+
 function useDesktopTtsState(): DesktopTtsState {
   const [state, setState] = useState<DesktopTtsState>(null);
 
@@ -261,7 +270,7 @@ const UserMessagePersistedUploads: FC = () => {
   if (visible.length === 0) return null;
 
   return (
-    <div className="aui-user-message-persisted-uploads flex flex-col gap-2">
+    <div className="aui-user-message-persisted-uploads flex w-fit max-w-full flex-col gap-2 self-end">
       {visible.map((u) => {
         const mime = typeof u.mime_type === "string" ? u.mime_type : "";
         const isImage = mime.startsWith("image/");
@@ -274,6 +283,7 @@ const UserMessagePersistedUploads: FC = () => {
           typeof u.parsed_excerpt === "string" && u.parsed_excerpt.trim()
             ? u.parsed_excerpt.trim()
             : "";
+        const displayExcerpt = excerpt && !isParserImageSummary(excerpt) ? excerpt : "";
 
         if (isImage) {
           return (
@@ -287,13 +297,13 @@ const UserMessagePersistedUploads: FC = () => {
                 <img
                   src={url}
                   alt={name}
-                  className="max-h-64 w-full object-contain"
+                  className="block h-auto max-h-96 w-auto max-w-[33rem] object-contain"
                   loading="lazy"
                 />
               </a>
-              {excerpt ? (
+              {displayExcerpt ? (
                 <div className="border-t px-3 py-2 text-xs text-muted-foreground">
-                  {excerpt.length > 320 ? excerpt.slice(0, 320) + "…" : excerpt}
+                  {displayExcerpt.length > 320 ? displayExcerpt.slice(0, 320) + "…" : displayExcerpt}
                 </div>
               ) : null}
             </div>
@@ -912,10 +922,9 @@ const UserMessage: FC = () => {
       className="aui-user-message-root fade-in slide-in-from-bottom-1 mx-auto grid w-full max-w-(--thread-max-width) animate-in auto-rows-auto grid-cols-[minmax(72px,1fr)_auto] content-start gap-y-2 px-2 py-3 duration-150 [&:where(>*)]:col-start-2"
       data-role="user"
     >
-      <UserMessagePersistedUploads />
-      <UserMessageAttachments />
-
-      <div className="aui-user-message-content-wrapper relative col-start-2 min-w-0">
+      <div className="aui-user-message-content-wrapper relative col-start-2 flex min-w-0 flex-col items-end gap-2">
+        <UserMessagePersistedUploads />
+        <UserMessageAttachments />
         <div className="aui-user-message-content wrap-break-word rounded-2xl bg-muted px-4 py-2.5 text-foreground">
           <MessagePrimitive.Parts />
         </div>

@@ -149,11 +149,40 @@ function inferSpeakerCharacterId(meta: unknown, fallbackCharacterId: string | nu
   return speakerCharacterId ?? fallbackCharacterId;
 }
 
+function sanitizeUserDisplayContent(raw: unknown): string {
+  const text = String(raw ?? "");
+  if (!text) return "";
+
+  const withoutImageBlocks = text
+    .replace(/<image\b[^>]*>[\s\S]*?<\/image>/gi, "")
+    .replace(/<image\b[^>]*>/gi, "")
+    .replace(/<\/image>/gi, "");
+
+  const withoutParserSummaries = withoutImageBlocks
+    .replace(
+      /(^|\n)\s*Image contains\s+\d+\s+dominant color clusters\s+with\s+edge_dens(?:ity)?[≈=][^\n]*(?=\n|$)/gi,
+      "$1",
+    )
+    .replace(
+      /(^|\n)\s*Image contains\s+\d+\s+dominant color clusters[^\n]*(?=\n|$)/gi,
+      "$1",
+    );
+
+  return withoutParserSummaries
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function normalizeFetchedMessage(m: any, fallbackCharacterId: string | null): Message {
+  const role = m.role === "user" ? "user" : "ai";
+  const contentRaw = String(m.content ?? "");
   return {
     id: String(m.id),
-    role: m.role === "user" ? "user" : "ai",
-    content: String(m.content ?? ""),
+    role,
+    content:
+      role === "user"
+        ? sanitizeUserDisplayContent(contentRaw)
+        : contentRaw,
     speakerId:
       typeof m.speaker_id === "string" && m.speaker_id
         ? m.speaker_id
