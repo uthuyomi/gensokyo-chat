@@ -521,7 +521,13 @@ const Composer: FC = () => {
   const { lang } = useLanguage();
   const disableKeyboardSubmit = useMobileKeyboardSubmitDisabled();
   return (
-    <ComposerPrimitive.Root className="aui-composer-root relative flex w-full flex-col">
+    <ComposerPrimitive.Root
+      className="aui-composer-root relative flex w-full flex-col"
+      onSubmit={(e) => {
+        if (!disableKeyboardSubmit) return;
+        e.preventDefault();
+      }}
+    >
       <ComposerPrimitive.AttachmentDropzone className="aui-composer-attachment-dropzone flex w-full flex-col rounded-[28px] border border-input/80 bg-background/92 px-1 pt-2 shadow-sm outline-none backdrop-blur transition-shadow has-[textarea:focus-visible]:border-ring has-[textarea:focus-visible]:ring-2 has-[textarea:focus-visible]:ring-ring/20 data-[dragging=true]:border-ring data-[dragging=true]:border-dashed data-[dragging=true]:bg-accent/50">
         <ComposerAttachments />
         <ComposerPrimitive.Input
@@ -550,7 +556,7 @@ const ComposerAction: FC = () => {
           <TooltipIconButton
             tooltip="Send message"
             side="bottom"
-            type="submit"
+            type="button"
             variant="default"
             size="icon"
             className="aui-composer-send size-9 rounded-full shadow-sm"
