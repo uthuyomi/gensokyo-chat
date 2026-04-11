@@ -969,34 +969,15 @@ const UserMessage: FC = () => {
       <div className="aui-user-message-content-wrapper col-start-2 flex min-w-0 flex-col items-end gap-2">
         <UserMessagePersistedUploads />
         <UserMessageAttachments />
-        <div className="aui-user-message-bubble-row relative flex w-full min-w-0 justify-end pr-10">
+        <div className="aui-user-message-bubble-row flex w-full min-w-0 justify-end">
           <div className="aui-user-message-content wrap-break-word ml-auto max-w-full rounded-2xl bg-muted px-4 py-2.5 text-foreground">
             <MessagePrimitive.Parts />
-          </div>
-          <div className="aui-user-action-bar-wrapper absolute top-1 right-1">
-            <UserActionBar />
           </div>
         </div>
       </div>
 
       <BranchPicker className="aui-user-branch-picker col-span-full col-start-1 row-start-3 -mr-1 justify-end" />
     </MessagePrimitive.Root>
-  );
-};
-
-const UserActionBar: FC = () => {
-  return (
-    <ActionBarPrimitive.Root
-      hideWhenRunning
-      autohide="not-last"
-      className="aui-user-action-bar-root flex flex-col items-end"
-    >
-      <ActionBarPrimitive.Edit asChild>
-        <TooltipIconButton tooltip="Edit" className="aui-user-action-edit p-4">
-          <PencilIcon />
-        </TooltipIconButton>
-      </ActionBarPrimitive.Edit>
-    </ActionBarPrimitive.Root>
   );
 };
 
