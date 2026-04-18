@@ -360,12 +360,55 @@ def build_naturalness_system(
     return "\n".join(lines).strip()
 
 
+
+
+def _strip_markdown_headings(text: str) -> str:
+    lines = str(text or "").splitlines()
+    out: List[str] = []
+    for ln in lines:
+        s = ln.lstrip()
+        if s.startswith("### ") or s.startswith("## ") or s.startswith("# "):
+            out.append(s.split(" ", 1)[1] if " " in s else s.lstrip("#"))
+        else:
+            out.append(ln)
+    return "\n".join(out)
+
+
+def _drop_trailing_choice_prompt(text: str) -> Tuple[str, List[str]]:
+    patterns = [
+        r"\n?\s*???.*(?:?????|???|???|????|????).*$",
+        r"\n?\s*???????.*$",
+        r"\n?\s*??????.*$",
+        r"\n?\s*????.*(?:???|????|????).*\?$",
+        r"\n?\s*????.*(?:???|????|????).*?$",
+    ]
+    removed: List[str] = []
+    cur = str(text or "")
+    for pat in patterns:
+        nxt = re.sub(pat, "", cur, flags=re.DOTALL)
+        if nxt != cur:
+            removed.append(pat)
+            cur = nxt
+    return cur.strip(), removed
+
+
+def _is_meta_probe(user_text: str) -> bool:
+    t = (user_text or "").strip()
+    if not t:
+        return False
+    markers = ("?????", "system prompt", "?????????", "??", "???", "??", "??", "prompt")
+    return any(m.lower() in t.lower() for m in markers)
+
+
 def sanitize_reply_text(
     *,
     reply_text: str,
     allow_choices: bool,
     max_questions: int = 1,
     remove_interview_prompts: bool = True,
+    suppress_markdown_headings: bool = False,
+    suppress_trailing_choice_prompt: bool = False,
+    brief_meta_refusal: bool = False,
     user_text: str = "",
     client_history: Any = None,
     character_id: Any = None,
@@ -446,6 +489,9 @@ def sanitize_reply_text(
         "question_count_after": int(_count_questions(t)),
         "max_questions": int(cap),
         "remove_interview_prompts": bool(remove_interview_prompts),
+        "suppress_markdown_headings": bool(suppress_markdown_headings),
+        "suppress_trailing_choice_prompt": bool(suppress_trailing_choice_prompt),
+        "brief_meta_refusal": bool(brief_meta_refusal),
     }
 
     # Additional postprocess (scoped to external persona injection to avoid breaking other apps).

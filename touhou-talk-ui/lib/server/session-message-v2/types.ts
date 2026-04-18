@@ -5,8 +5,9 @@ export type SessionMessageRouteContext = {
 export type SessionMessageStage =
   | "validate-request"
   | "load-context"
-  | "decide-pipeline"
-  | "delegate-legacy";
+  | "upload-attachments"
+  | "persist-user-message"
+  | "delegate-runtime";
 
 export type PersonaChatResponse = { reply: string; meta?: Record<string, unknown> };
 
@@ -15,33 +16,6 @@ export type PersonaToolPolicy = {
   web_search_mode?: "off" | "auto" | "required";
   allow_web_search?: boolean;
   prefer_native_attachments?: boolean;
-};
-
-export type PersonaIntentLabel =
-  | "banter"
-  | "chitchat"
-  | "advice"
-  | "task"
-  | "incident"
-  | "lore"
-  | "roleplay_scene"
-  | "meta"
-  | "safety"
-  | "unclear";
-
-export type PersonaOutputStyle = "normal" | "bullet_3" | "choice_2";
-export type PersonaUrgency = "low" | "normal" | "high";
-export type PersonaSafetyRisk = "none" | "low" | "med" | "high";
-
-export type PersonaIntentResponse = {
-  intent: PersonaIntentLabel;
-  confidence: number;
-  output_style: PersonaOutputStyle;
-  allowed_humor: boolean;
-  urgency: PersonaUrgency;
-  needs_clarify: boolean;
-  clarify_question: string;
-  safety_risk: PersonaSafetyRisk;
 };
 
 export type Phase04Attachment = {

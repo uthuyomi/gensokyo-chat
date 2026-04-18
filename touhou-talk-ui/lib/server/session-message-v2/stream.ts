@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import type { supabaseServer } from "@/lib/supabase-server";
 import { CHARACTERS } from "@/data/characters";
-import type { TouhouChatMode } from "@/lib/touhouPersona";
+import type { TouhouChatMode } from "@/lib/touhou-settings";
 import {
   mergeMeta,
   isRecord,
@@ -14,17 +14,8 @@ import {
   buildVrmPerformanceCue,
   toVrmPerformanceMeta,
 } from "@/lib/vrm/performanceDirector";
-import type {
-  PersonaIntentResponse,
-  PersonaToolPolicy,
-} from "@/lib/server/session-message-v2/types";
-import {
-  toSse,
-  effectiveOutputStyle,
-  lintOutputStyle,
-  coerceToForcedStyle,
-} from "@/lib/server/session-message-v2/director";
-import { sanitizeReplyByContext } from "@/lib/server/session-message-v2/sanitize";
+import type { PersonaToolPolicy } from "@/lib/server/session-message-v2/types";
+import { toSse } from "@/lib/server/session-message-v2/sse";
 import {
   saveAssistantMessage,
   saveStateSnapshot,
@@ -45,19 +36,15 @@ export async function handleStreamSessionMessage(params: {
   base: string;
   chatMode: TouhouChatMode;
   characterId: string;
+  locale: string;
   text: string;
   coreHistory: Array<{ role: "user" | "assistant"; content: string }>;
   coreAttachments: Record<string, unknown>[];
-  personaSystemWithRetrieval: string;
-  personaSystemSha256: string;
-  gen: ReturnType<typeof import("@/lib/touhouPersona").genParamsFor>;
-  intent: PersonaIntentResponse | null;
   isSeedTurn: boolean;
   shouldGenerateTtsReading: boolean;
   shouldUpdateRelationship: boolean;
 }) {
   const enrichedGen = {
-    ...params.gen,
     multimodal: {
       mode: "sdk_first" as const,
       attachment_count: params.coreAttachments.length,
@@ -89,10 +76,17 @@ export async function handleStreamSessionMessage(params: {
         history: params.coreHistory,
         character_id: params.characterId,
         chat_mode: params.chatMode,
-        persona_system: params.personaSystemWithRetrieval,
         gen: enrichedGen,
         attachments: params.coreAttachments,
         tool_policy: toolPolicy,
+        client_context: {
+          ui_type: "touhou-talk-ui",
+          surface: "session-message",
+          locale: params.locale,
+        },
+        conversation_profile: {
+          response_style: "auto",
+        },
       }),
     });
   } catch (e) {
@@ -134,21 +128,7 @@ export async function handleStreamSessionMessage(params: {
       display_name: CHARACTERS[params.characterId]?.name ?? params.characterId,
       title: CHARACTERS[params.characterId]?.title ?? null,
     },
-    persona_system_sha256: params.personaSystemSha256,
     seed_turn: params.isSeedTurn,
-    ...(params.intent
-      ? {
-          director_overlay: true,
-          intent: params.intent.intent,
-          intent_confidence: params.intent.confidence,
-          intent_output_style: params.intent.output_style,
-          intent_effective_output_style: effectiveOutputStyle(params.intent),
-          intent_allowed_humor: params.intent.allowed_humor,
-          intent_urgency: params.intent.urgency,
-          intent_needs_clarify: params.intent.needs_clarify,
-          intent_safety_risk: params.intent.safety_risk,
-        }
-      : { director_overlay: false }),
   };
 
   let replyAcc = "";
@@ -156,6 +136,7 @@ export async function handleStreamSessionMessage(params: {
 
   (async () => {
     let buf = "";
+    let sawReplyDelta = false;
 
     try {
       while (true) {
@@ -185,7 +166,7 @@ export async function handleStreamSessionMessage(params: {
 
           const dataRaw = dataLines.join("\n");
 
-          if (event === "delta") {
+          if (event === "reply.delta" || event === "delta") {
             try {
               const parsed = JSON.parse(dataRaw);
               const textPart =
@@ -193,10 +174,43 @@ export async function handleStreamSessionMessage(params: {
                   ? parsed.text
                   : "";
 
+              if (event === "reply.delta") {
+                sawReplyDelta = true;
+              } else if (sawReplyDelta) {
+                continue;
+              }
+
               if (textPart) replyAcc += textPart;
               await writer.write(toSse("delta", { text: textPart }));
             } catch {
+              if (event === "delta" && sawReplyDelta) {
+                continue;
+              }
               await writer.write(`event: delta\ndata: ${dataRaw}\n\n`);
+            }
+          } else if (event === "meta.partial") {
+            try {
+              const parsed = JSON.parse(dataRaw);
+              if (isRecord(parsed)) {
+                finalMeta = mergeMeta(finalMeta, parsed);
+              }
+              await writer.write(
+                toSse("meta.partial", isRecord(parsed) ? parsed : {}),
+              );
+            } catch {
+              await writer.write(`event: meta.partial\ndata: ${dataRaw}\n\n`);
+            }
+          } else if (event === "meta.final") {
+            try {
+              const parsed = JSON.parse(dataRaw);
+              if (isRecord(parsed)) {
+                finalMeta = mergeMeta(finalMeta, parsed);
+              }
+              await writer.write(
+                toSse("meta.final", isRecord(parsed) ? parsed : {}),
+              );
+            } catch {
+              await writer.write(`event: meta.final\ndata: ${dataRaw}\n\n`);
             }
           } else if (event === "done") {
             try {
@@ -228,62 +242,10 @@ export async function handleStreamSessionMessage(params: {
                 ...coreRouting,
               });
 
-              const replyGuarded = sanitizeReplyByContext({
-                characterId: params.characterId,
-                chatMode: params.chatMode,
-                reply,
-                history: params.coreHistory,
-                currentUserText: params.text,
-              });
-
-              let replyFinal = replyGuarded;
-              let forcedStylePassed = true;
-              let forcedStyleRetry = false;
-              let forcedStyleReason = "";
-
-              if (params.intent) {
-                const style = effectiveOutputStyle(params.intent);
-                const lint1 = lintOutputStyle({
-                  style,
-                  intent: params.intent,
-                  reply: replyFinal,
-                });
-
-                if (!lint1.ok) {
-                  forcedStylePassed = false;
-                  forcedStyleReason = lint1.reason;
-
-                  const coerced = coerceToForcedStyle({
-                    style,
-                    intent: params.intent,
-                    reply: replyFinal,
-                  });
-
-                  if (coerced.applied) {
-                    const lint2 = lintOutputStyle({
-                      style,
-                      intent: params.intent,
-                      reply: coerced.reply,
-                    });
-
-                    forcedStyleRetry = true;
-
-                    if (lint2.ok) {
-                      forcedStylePassed = true;
-                      forcedStyleReason = "";
-                      replyFinal = coerced.reply;
-                    } else {
-                      forcedStyleReason = `coerce_${lint2.reason}`;
-                    }
-                  }
-                }
-
-                finalMeta = mergeMeta(finalMeta, {
-                  forced_output_style_passed: forcedStylePassed,
-                  forced_output_style_retry: forcedStyleRetry,
-                  forced_output_style_reason: forcedStyleReason,
-                });
-              }
+              const replyFinal =
+                typeof reply === "string" && reply.trim().length > 0
+                  ? reply
+                  : "うまく返答を受け取れなかった。もう一度だけ試してくれ。";
 
               const ttsReading = params.shouldGenerateTtsReading
                 ? await generateTtsReadingText({
@@ -325,61 +287,28 @@ export async function handleStreamSessionMessage(params: {
       const msg = e instanceof Error ? e.message : String(e);
       await writer.write(toSse("error", { error: msg }));
     } finally {
-      let replyGuarded = "";
+      const replyFinal =
+        typeof replyAcc === "string" && replyAcc.trim().length > 0
+          ? replyAcc
+          : "すまん、返答を最後まで受け取れなかった。";
 
       try {
-        const replySafe =
-          typeof replyAcc === "string" && replyAcc.trim().length > 0
-            ? replyAcc
-            : "すみません、うまく返答をまとめられませんでした。もう一度試してください。";
-
-        replyGuarded = sanitizeReplyByContext({
-          characterId: params.characterId,
-          chatMode: params.chatMode,
-          reply: replySafe,
-          history: params.coreHistory,
-          currentUserText: params.text,
-        });
-
-      } catch (e) {
-        console.warn("[touhou] sanitize final stream reply failed:", e);
-      }
-
-      try {
-        console.info("[touhou] persist ai message start:", {
-          sessionId: params.sessionId,
-          characterId: params.characterId,
-        });
-
         const aiInsertError = await saveAssistantMessage({
           supabase: params.supabase,
           sessionId: params.sessionId,
           userId: params.userId,
           characterId: params.characterId,
-          content: replyGuarded,
+          content: replyFinal,
           meta: finalMeta,
         });
 
         if (aiInsertError) {
-          console.warn("[touhou] persist ai message failed:", aiInsertError);
           await writer.write(
             toSse("error", { error: "Failed to persist ai message" }),
           );
-        } else {
-          console.info("[touhou] persist ai message success:", {
-            sessionId: params.sessionId,
-            characterId: params.characterId,
-          });
         }
       } catch (e) {
         console.warn("[touhou] persist ai message crashed:", e);
-        try {
-          await writer.write(
-            toSse("error", { error: "AI message persistence crashed" }),
-          );
-        } catch {
-          // ignore
-        }
       }
 
       runPostReplyTasks(async () => {
@@ -408,7 +337,7 @@ export async function handleStreamSessionMessage(params: {
           characterId: params.characterId,
           chatMode: params.chatMode,
           userText: params.text,
-          assistantText: replyGuarded,
+          assistantText: replyFinal,
           shouldUpdate: params.shouldUpdateRelationship,
         });
       });

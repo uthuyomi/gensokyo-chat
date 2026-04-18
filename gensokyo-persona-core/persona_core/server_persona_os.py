@@ -61,6 +61,10 @@ from persona_core.storage.supabase_storage import SupabaseStorageClient, Supabas
 from persona_core.ego.ego_state import EgoContinuityState
 from persona_core.temporal_identity.temporal_identity_state import TemporalIdentityState
 from persona_core.phase04.runtime import get_phase04_runtime
+from persona_core.character_runtime.models import ResolvedCharacterBehavior, SafetyOverlay, SituationAssessment
+from persona_core.character_runtime.registry import get_character_registry
+from persona_core.rendering.character_renderer import render_character_reply
+from persona_core.runtime.character_chat_runtime import CharacterChatRuntime
 
 
 log = get_logger(__name__)
@@ -611,6 +615,9 @@ class ChatRequest(BaseModel):
     # Phase04: attachment metadata references (bytes are uploaded separately)
     attachments: Optional[List[Dict[str, Any]]] = None
     tool_policy: Optional[Dict[str, Any]] = None
+    user_profile: Optional[Dict[str, Any]] = None
+    client_context: Optional[Dict[str, Any]] = None
+    conversation_profile: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
     def _require_message_or_messages(self) -> "ChatRequest":
@@ -912,6 +919,94 @@ def _resolved_attachment_ids(native_attachments: Optional[List[Dict[str, Any]]])
 class ChatResponse(BaseModel):
     reply: str
     meta: Dict[str, Any]
+
+
+_character_chat_runtime_lock = threading.Lock()
+_character_chat_runtime: Optional[CharacterChatRuntime] = None
+
+
+def _get_character_chat_runtime() -> CharacterChatRuntime:
+    global _character_chat_runtime
+    if _character_chat_runtime is None:
+        with _character_chat_runtime_lock:
+            if _character_chat_runtime is None:
+                _character_chat_runtime = CharacterChatRuntime(llm_client=_get_llm_client())
+    return _character_chat_runtime
+
+
+@app.get("/persona/characters")
+async def persona_characters() -> Dict[str, Any]:
+    runtime = _get_character_chat_runtime()
+    return {
+        "characters": runtime.list_characters(),
+        "meta": {
+            "engine_version": ENGINE_VERSION,
+            "build_sha": str(BUILD_SHA),
+            "config_hash": str(CONFIG_HASH),
+            "system_runtime": "character_chat_runtime_v2",
+        },
+    }
+
+
+@app.get("/persona/characters/{character_id}")
+async def persona_character_detail(character_id: str) -> Dict[str, Any]:
+    runtime = _get_character_chat_runtime()
+    try:
+        character = runtime.get_character(character_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {
+        "character": character,
+        "meta": {
+            "engine_version": ENGINE_VERSION,
+            "build_sha": str(BUILD_SHA),
+            "config_hash": str(CONFIG_HASH),
+            "system_runtime": "character_chat_runtime_v2",
+        },
+    }
+
+
+@app.get("/persona/session/{session_id}")
+async def persona_session_detail(session_id: str, auth: Optional[AuthContext] = Depends(get_auth_context)) -> Dict[str, Any]:
+    if _supabase is None:
+        raise HTTPException(status_code=503, detail="Session detail requires Supabase configuration")
+
+    user_id = auth.user_id if auth is not None else DEFAULT_USER_ID
+    try:
+        session_rows = _supabase.select(
+            "common_sessions",
+            columns="id,app,title,character_id,mode,layer,location,chat_mode,meta,created_at,updated_at",
+            filters=[f"id=eq.{session_id}", f"user_id=eq.{user_id}"],
+            limit=1,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load session: {e}")
+
+    session_row = session_rows[0] if isinstance(session_rows, list) and session_rows else None
+    if not isinstance(session_row, dict):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        messages = _supabase.select(
+            "common_messages",
+            columns="id,role,content,speaker_id,meta,created_at",
+            filters=[f"session_id=eq.{session_id}", f"user_id=eq.{user_id}"],
+            order="created_at.asc",
+            limit=50,
+        )
+    except Exception:
+        messages = []
+
+    return {
+        "session": session_row,
+        "messages": messages if isinstance(messages, list) else [],
+        "meta": {
+            "engine_version": ENGINE_VERSION,
+            "build_sha": str(BUILD_SHA),
+            "config_hash": str(CONFIG_HASH),
+            "system_runtime": "character_chat_runtime_v2",
+        },
+    }
 
 def _safe_str(v: Any) -> str:
     try:
@@ -1682,8 +1777,8 @@ async def persona_intent(req: PersonaIntentRequest, auth: Optional[AuthContext] 
     return parsed
 
 
-def _merge_external_system(persona_system: Optional[str], system: Optional[str]) -> Optional[str]:
-    a = (persona_system or "").strip()
+def _merge_external_system(persona_system: Optional[str], system: Optional[str], *, allow_persona_system: bool) -> Optional[str]:
+    a = (persona_system or "").strip() if allow_persona_system else ""
     b = (system or "").strip()
     if a and b:
         return a + "\n\n" + b
@@ -1998,6 +2093,41 @@ def _intent_keyword_hint(message: str) -> Optional[str]:
         return "realtime_fact"
 
     return None
+
+
+def _render_stream_final_reply(*, reply: str, runtime_meta: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
+    try:
+        character_id = str(runtime_meta.get("character_id") or "").strip()
+        if not character_id:
+            return reply, {}
+        asset = get_character_registry().get(character_id)
+        if asset is None:
+            return reply, {}
+        assessment = SituationAssessment.model_validate(runtime_meta.get("situation_snapshot") or {})
+        behavior = ResolvedCharacterBehavior.model_validate(runtime_meta.get("behavior_snapshot") or {})
+        safety = SafetyOverlay.model_validate(runtime_meta.get("safety_snapshot") or {})
+        resolved_locale = str(runtime_meta.get("resolved_locale") or "ja-JP").strip() or "ja-JP"
+        locale_snapshot = runtime_meta.get("locale_style_snapshot") or {}
+        locale_profile = asset.locales.get(resolved_locale) if isinstance(asset.locales, dict) else None
+        if locale_profile is None and isinstance(locale_snapshot, dict):
+            from persona_core.character_runtime.models import CharacterLocaleProfile
+
+            locale_profile = CharacterLocaleProfile.model_validate(locale_snapshot)
+        if locale_profile is None:
+            from persona_core.character_runtime.models import CharacterLocaleProfile
+
+            locale_profile = CharacterLocaleProfile(locale=resolved_locale)
+        return render_character_reply(
+            asset=asset,
+            assessment=assessment,
+            behavior=behavior,
+            safety=safety,
+            locale_profile=locale_profile,
+            resolved_locale=resolved_locale,
+            reply=reply,
+        )
+    except Exception:
+        return reply, {}
 
 
 def _should_override_intent_with_hint(*, classified_intent: str, hinted_intent: Optional[str]) -> bool:
@@ -3151,7 +3281,7 @@ async def persona_chat(req: ChatRequest, auth: Optional[AuthContext] = Depends(g
     session_id = req.session_id or f"{user_id}:{uuid.uuid4().hex}"
 
     effective_message, client_history = _derive_message_and_history(req)
-    external_system = _merge_external_system(req.persona_system, req.system)
+    external_system = _merge_external_system(req.persona_system, req.system, allow_persona_system=not bool(req.character_id))
     effective_gen = _merge_gen_with_tool_policy(req.gen, req.tool_policy)
     tool_policy = _tool_policy_dict(req.tool_policy)
     native_attachments = _resolve_native_attachments(attachments=req.attachments, auth=auth) if _should_use_native_attachments(effective_gen) else []
@@ -3163,6 +3293,51 @@ async def persona_chat(req: ChatRequest, auth: Optional[AuthContext] = Depends(g
     )
     if attachments_ctx:
         effective_message = (effective_message + "\n\n" + attachments_ctx).strip()
+
+    if req.character_id:
+        resolved_ctx = await _resolve_turn_external_context(
+            intent=_classify_turn_intent(effective_message=effective_message, tool_policy=tool_policy),
+            effective_message=effective_message,
+            effective_gen=(effective_gen if isinstance(effective_gen, dict) else {}),
+            tool_policy=tool_policy,
+            trace_id=trace_id,
+            session_id=session_id,
+            user_id=str(user_id),
+        )
+        web_ctx = resolved_ctx["web_ctx"]
+        try:
+            character_runtime = _get_character_chat_runtime()
+            reply_text, runtime_meta = character_runtime.generate(
+                character_id=req.character_id,
+                message=effective_message,
+                history=client_history,
+                chat_mode=req.chat_mode,
+                external_system=external_system,
+                external_knowledge=web_ctx if isinstance(web_ctx, str) else None,
+                gen=effective_gen,
+                user=str(user_id),
+                audit_ctx={
+                    "user_id": str(user_id),
+                    "session_id": str(session_id),
+                    "trace_id": trace_id,
+                },
+                user_profile=req.user_profile,
+                client_context=req.client_context,
+                conversation_profile=req.conversation_profile,
+            )
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+        meta = {
+            **runtime_meta,
+            "trace_id": trace_id,
+            "timing_ms": int((time.time() - t0) * 1000),
+            "engine_version": ENGINE_VERSION,
+            "build_sha": str(BUILD_SHA),
+            "config_hash": str(CONFIG_HASH),
+                "system_runtime": "character_chat_runtime_v2",
+        }
+        return ChatResponse(reply=reply_text, meta=meta)
 
     overload_score = _estimate_overload_score(effective_message)
 
@@ -3489,7 +3664,7 @@ async def persona_chat_stream(req: ChatRequest, auth: Optional[AuthContext] = De
     user_id = (auth.user_id if auth is not None else (req.user_id or DEFAULT_USER_ID))
     session_id = req.session_id or f"{user_id}:{uuid.uuid4().hex}"
     effective_message, client_history = _derive_message_and_history(req)
-    external_system = _merge_external_system(req.persona_system, req.system)
+    external_system = _merge_external_system(req.persona_system, req.system, allow_persona_system=not bool(req.character_id))
     effective_gen = _merge_gen_with_tool_policy(req.gen, req.tool_policy)
     tool_policy = _tool_policy_dict(req.tool_policy)
     native_attachments = _resolve_native_attachments(attachments=req.attachments, auth=auth) if _should_use_native_attachments(effective_gen) else []
@@ -3501,6 +3676,83 @@ async def persona_chat_stream(req: ChatRequest, auth: Optional[AuthContext] = De
     )
     if attachments_ctx:
         effective_message = (effective_message + "\n\n" + attachments_ctx).strip()
+
+    if req.character_id:
+        resolved_ctx = await _resolve_turn_external_context(
+            intent=_classify_turn_intent(effective_message=effective_message, tool_policy=tool_policy),
+            effective_message=effective_message,
+            effective_gen=(effective_gen if isinstance(effective_gen, dict) else {}),
+            tool_policy=tool_policy,
+            trace_id=trace_id,
+            session_id=session_id,
+            user_id=str(user_id),
+        )
+        web_ctx = resolved_ctx["web_ctx"]
+        try:
+            character_runtime = _get_character_chat_runtime()
+            stream_iter, runtime_meta = character_runtime.generate_stream(
+                character_id=req.character_id,
+                message=effective_message,
+                history=client_history,
+                chat_mode=req.chat_mode,
+                external_system=external_system,
+                external_knowledge=web_ctx if isinstance(web_ctx, str) else None,
+                gen=effective_gen,
+                user=str(user_id),
+                audit_ctx={
+                    "user_id": str(user_id),
+                    "session_id": str(session_id),
+                    "trace_id": trace_id,
+                },
+                user_profile=req.user_profile,
+                client_context=req.client_context,
+                conversation_profile=req.conversation_profile,
+            )
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
+        async def _runtime_sse():
+            final_chunks: List[str] = []
+            try:
+                partial_meta = {
+                    "character_id": runtime_meta.get("character_id"),
+                    "interaction_type": runtime_meta.get("interaction_type"),
+                    "safety_risk": runtime_meta.get("safety_risk"),
+                    "resolved_locale": runtime_meta.get("resolved_locale"),
+                }
+                payload = json.dumps(partial_meta, ensure_ascii=False)
+                yield f"event: meta.partial\ndata: {payload}\n\n"
+                for chunk in stream_iter:
+                    text = str(chunk or "")
+                    if not text:
+                        continue
+                    final_chunks.append(text)
+                    payload = json.dumps({"text": text}, ensure_ascii=False)
+                    yield f"event: reply.delta\ndata: {payload}\n\n"
+                    yield f"event: delta\ndata: {payload}\n\n"
+                final_reply, render_meta = _render_stream_final_reply(
+                    reply="".join(final_chunks),
+                    runtime_meta=runtime_meta,
+                )
+                meta = {
+                    **runtime_meta,
+                    **({"rendering": render_meta} if isinstance(render_meta, dict) and render_meta else {}),
+                    "trace_id": trace_id,
+                    "timing_ms": int((time.time() - t0) * 1000),
+                    "engine_version": ENGINE_VERSION,
+                    "build_sha": str(BUILD_SHA),
+                    "config_hash": str(CONFIG_HASH),
+                    "system_runtime": "character_chat_runtime_v2",
+                }
+                final_meta_payload = json.dumps(meta, ensure_ascii=False)
+                yield f"event: meta.final\ndata: {final_meta_payload}\n\n"
+                payload = json.dumps({"reply": final_reply, "meta": meta}, ensure_ascii=False)
+                yield f"event: done\ndata: {payload}\n\n"
+            except Exception as e:
+                payload = json.dumps({"error": str(e)}, ensure_ascii=False)
+                yield f"event: error\ndata: {payload}\n\n"
+
+        return StreamingResponse(_runtime_sse(), media_type="text/event-stream")
 
     overload_score = _estimate_overload_score(effective_message)
 

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { supabaseServer, requireUser } from "@/lib/supabase-server";
 import { resolveCoreBaseUrl } from "@/lib/server/session-message/core-base";
 import { loadCoreHistory } from "@/lib/server/session-message/history";
-import type { TouhouChatMode } from "@/lib/touhouPersona";
+import type { TouhouChatMode } from "@/lib/touhou-settings";
 import { getAccessibleTouhouSession } from "@/lib/rooms/access";
 
 import type { SessionMessageRouteContext } from "./types";

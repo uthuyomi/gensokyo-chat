@@ -1,7 +1,7 @@
 import { supabaseServer } from "@/lib/supabase-server";
 import { envFlag } from "@/lib/server/session-message/request";
 import { isRecord } from "@/lib/server/session-message/meta";
-import { TouhouChatMode } from "@/lib/touhouPersona";
+import { TouhouChatMode } from "@/lib/touhou-settings";
 
 import {
   RelationshipState,

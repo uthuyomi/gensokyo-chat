@@ -11,7 +11,6 @@ def get_policy(has_external_persona: bool) -> RoleplayCharacterPolicy:
         stop_memory_injection=bool(has_external_persona),
         max_questions_per_turn=1,
         remove_interview_prompts=True,
-        max_tokens_cap=860,
+        max_tokens_cap=620,
         quality_mode="roleplay",
     )
-

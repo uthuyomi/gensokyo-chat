@@ -12,7 +12,10 @@ def get_policy(has_external_persona: bool) -> RoleplayCharacterPolicy:
         stop_memory_injection=bool(has_external_persona),
         max_questions_per_turn=1,
         remove_interview_prompts=True,
-        max_tokens_cap=900,
+        suppress_markdown_headings=True,
+        suppress_trailing_choice_prompt=True,
+        brief_meta_refusal=True,
+        max_tokens_cap=520,
         quality_mode="roleplay",
     )
 
