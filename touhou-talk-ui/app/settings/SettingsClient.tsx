@@ -20,7 +20,7 @@ import {
   type TouhouChatMode,
   type TouhouTheme,
 } from "@/lib/touhou-settings";
-import { CHARACTER_CATALOG } from "@/lib/touhouPersona/characterCatalog";
+import { CHARACTER_CATALOG } from "@/lib/characterCatalog";
 
 function ThemeButton({
   label,

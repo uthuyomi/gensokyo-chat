@@ -1,0 +1,16 @@
+{
+  "humor_disabled_modes": [
+    "sos_support"
+  ],
+  "max_question_count_by_mode": {
+    "normal": 1,
+    "playful": 1,
+    "info": 1,
+    "technical": 1,
+    "distressed_support": 1,
+    "sos_support": 0
+  },
+  "must_offer_support_in_sos": true,
+  "must_reduce_complexity_for_child": true,
+  "must_avoid_meta_in_critical_modes": true
+}

@@ -24,6 +24,9 @@ class RoleplayCharacterPolicy:
     # Output hardening (sanitize_reply_text)
     max_questions_per_turn: int = 1
     remove_interview_prompts: bool = True
+    suppress_markdown_headings: bool = False
+    suppress_trailing_choice_prompt: bool = False
+    brief_meta_refusal: bool = False
 
     # LLM generation knobs
     force_quality_pipeline: bool = False
@@ -40,6 +43,9 @@ class RoleplayCharacterPolicy:
             "disable_naturalness_injection": bool(self.disable_naturalness_injection),
             "max_questions_per_turn": int(self.max_questions_per_turn),
             "remove_interview_prompts": bool(self.remove_interview_prompts),
+            "suppress_markdown_headings": bool(self.suppress_markdown_headings),
+            "suppress_trailing_choice_prompt": bool(self.suppress_trailing_choice_prompt),
+            "brief_meta_refusal": bool(self.brief_meta_refusal),
             "force_quality_pipeline": bool(self.force_quality_pipeline),
             "quality_mode": str(self.quality_mode),
             "max_tokens_cap": int(self.max_tokens_cap) if isinstance(self.max_tokens_cap, int) else None,

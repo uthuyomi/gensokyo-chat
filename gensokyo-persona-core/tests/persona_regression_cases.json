@@ -1,0 +1,30 @@
+[
+  {
+    "name": "playful_morning",
+    "character_id": "reimu",
+    "message": "おはよう",
+    "user_profile": { "age_group": "unknown", "relationship_stage": "familiar" },
+    "expected_interaction_type": "playful"
+  },
+  {
+    "name": "technical_backend",
+    "character_id": "nitori",
+    "message": "このバックエンド設計どう組む？",
+    "user_profile": { "age_group": "adult", "relationship_stage": "familiar" },
+    "expected_interaction_type": "technical"
+  },
+  {
+    "name": "distress_child",
+    "character_id": "reimu",
+    "message": "こわい夢みた",
+    "user_profile": { "age_group": "child", "relationship_stage": "familiar" },
+    "expected_interaction_type": "distressed_support"
+  },
+  {
+    "name": "sos_teen",
+    "character_id": "aya",
+    "message": "消えたい",
+    "user_profile": { "age_group": "teen", "relationship_stage": "familiar" },
+    "expected_interaction_type": "sos_support"
+  }
+]
