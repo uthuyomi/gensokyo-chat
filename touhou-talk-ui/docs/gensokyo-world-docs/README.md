@@ -1,47 +1,28 @@
-# gensokyo-world-docs
+# Gensokyo world docs
 
-AI 幻想郷ワールド（Time Skip Simulation 中心）の設計メモです。
+This directory contains frontend-side planning and reference material for world-layer features in the `gensokyo-chat` workspace.
+It covers how world context may be represented, surfaced, or integrated across UI and supporting services.
 
-実装の対応フォルダは以下です。
+## Quick Read
 
-- サーバ実装: `gensokyo-world-engine/`
-- WS ゲートウェイ: `gensokyo-event-gateway/`
-- DB スキーマ: `supabase/GENSOKYO_WORLD_SCHEMA.sql`
+- Project summary: Frontend-side planning docs for world-context features.
+- Scope: Maps world-state ideas into UI and service integration plans.
+- Technical highlights: World-layer architecture notes, schema thinking, integration routes, and planning references.
+- Why it matters: It shows deliberate expansion planning rather than unstructured feature accumulation.
 
-## 読む順番（推奨）
+## Topics covered
 
-1. `ai-gensokyo-world-design.md`（全体像）
-2. `00_stack_and_phased_architecture.md`（導入順・ライブラリの使いどころ）
-3. `01_supabase_schema_ai_gensokyo.md`（DB）
-4. `02_event_generation_engine.md`（イベント生成）
-5. `03_npc_behavior_planner.md`（NPC 行動）
-6. `04_scalability_and_simulation_architecture.md`（スケール）
+- world-layer architecture
+- Supabase schema and world data modeling
+- event generation and simulation plans
+- UI integration points
+- observability, cost, and testing considerations
 
-## 実装で迷った場合（用途別）
+## Scope boundary
 
-- データの形を固定したい場合: `05_domain_models_and_data_specs.md`
-- API の I/O を固定したい場合: `06_api_contracts_world_layer.md`
-- プロンプトの部品を参照したい場合: `07_prompt_templates.md`
-- テスト観点/破綻検知を整理したい場合: `08_checklists_and_test_plan.md`
-- 素材（場所/キャラ/イベント）を作る場合: `09_content_authoring_playbook.md`
-- Time Skip の核（invariants/tick）を確認したい場合: `10_world_engine_invariants_and_tick.md`
-- DB 適用/seed/ローカル起動の手順: `11_migrations_seeding_and_local_dev.md`
-- 既存 UI への統合: `12_integration_with_touhou_talk_ui.md`
-- 運用/コスト/観測: `13_observability_and_cost_tuning.md`
-- 品質チェック用プロンプト集: `14_prompt_regression_suite.md`
-- 2D→3D への段階移行: `15_3d_migration_path.md`
-- リアルタイム（WS）イベントゲートウェイ: `16_realtime_event_gateway_ws.md`
-- ユーザー介入（Command Bus）: `17_command_bus_and_user_interactions.md`
-- Relation/記憶/自律シム: `18_character_relations_scoped_memory_and_simulation.md`
+These documents are about world context and integration strategy.
+They do not replace the backend-owned character runtime design in `gensokyo-persona-core`.
 
-## 方針（短縮版）
+## Suggested starting point
 
-- リアルタイム常時計算は行いません（Time Skip）
-- 行動決定はルール（FSM/BT）を中心に設計します
-- LLM は会話/要約に限定します
-
-## world_id 命名規約
-
-- 本番メイン: `gensokyo_main`
-- テスト: `gensokyo_test`
-- シャード: `gensokyo_shard_01`, `gensokyo_shard_02`, ...
+Begin with `00_stack_and_phased_architecture.md`, then move into schema, API, and integration documents as needed.

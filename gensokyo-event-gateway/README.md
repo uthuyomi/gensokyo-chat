@@ -1,63 +1,56 @@
 # gensokyo-event-gateway
 
-Optional WebSocket gateway that streams ordered world events from Supabase (`world_event_log`).
+`gensokyo-event-gateway` is the event transport layer for the `gensokyo-chat` workspace.
+It isolates subscriptions, WebSocket delivery, and event-facing integration concerns from both the persona backend and the UI.
 
-Design goals:
+## Quick Read
 
-- UI clients connect over WS
-- Subscribe to a `channel` (e.g. `world:gensokyo_main:hakurei_shrine`)
-- Receive a snapshot (from `lastSeq + 1`) and then live inserts via Supabase Realtime (no polling)
+- Project summary: A dedicated WebSocket event gateway for live delivery and subscriptions.
+- Scope: Separates event transport concerns from runtime and frontend application logic.
+- Technical highlights: Authenticated connection flow, channel subscription handling, snapshot delivery, and cleanup lifecycle management.
+- Why it matters: Real-time transport stays modular instead of leaking into unrelated services.
 
-## Run locally
+## Responsibilities
 
-### Prerequisites
+- websocket-based event delivery
+- transport and subscription handling
+- service-to-client event fan-out
+- event integration boundaries that should stay outside persona generation
 
-- Node.js (LTS) + npm
-- Supabase schema applied (`supabase/GENSOKYO_WORLD_SCHEMA.sql`)
+## Observed runtime behavior
 
-### Install
+From the current code, the server:
+
+- starts a standalone WebSocket server
+- requires an initial `hello` message for authentication
+- allows authenticated clients to subscribe and unsubscribe by channel
+- validates channel names before opening live subscriptions
+- sends a snapshot on subscribe, then attaches the live stream
+- cleans up hub membership when sockets close
+
+This is a relatively small module, but it demonstrates a clean separation between authentication, protocol parsing, subscription registry management, snapshot delivery, and connection cleanup.
+
+## Directory snapshot
+
+| Path | Role |
+| --- | --- |
+| `src/ws/` | WebSocket-facing logic |
+| `src/auth/` | Connection authentication helpers |
+| `src/subscriptions/` | Subscription management |
+| `src/streaming/` | Streaming-related transport code |
+| `src/protocol/` | Gateway protocol definitions |
+| `src/index.ts` | Service entrypoint |
+
+## Development
 
 ```powershell
 cd gensokyo-event-gateway
 npm install
-```
-
-### Env
-
-The provided scripts read `../.env` via Node's `--env-file`.
-
-Required:
-
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-Optional:
-
-- `SUPABASE_SCHEMA` (default: `public`)
-- `GENSOKYO_EVENT_GATEWAY_HOST` (default: `127.0.0.1`)
-- `GENSOKYO_EVENT_GATEWAY_PORT` (default: `8787`)
-- `GENSOKYO_EVENT_GATEWAY_ALLOW_ANON=1` (default: `1` for local dev; set `0` in production)
-
-### Build & start
-
-```powershell
 npm run build
-npm run start
+npm run dev
 ```
 
-Default WS URL: `ws://127.0.0.1:8787`
+## Project position
 
-## Protocol (minimal)
-
-Client messages:
-
-- `{"type":"hello","auth":{"mode":"supabase_jwt","access_token":"..."}}`
-- `{"type":"subscribe","channel":"world:gensokyo_main:hakurei_shrine","lastSeq":123}`
-- `{"type":"unsubscribe","channel":"world:gensokyo_main:hakurei_shrine"}`
-
-Server messages:
-
-- `{"type":"ack","hello":true}`
-- `{"type":"snapshot","channel":"...","fromSeq":124,"events":[...]}`
-- `{"type":"event","channel":"...","event":{...}}`
-- `{"type":"error","code":"...","message":"..."}`
+This module is supporting infrastructure.
+It is important for real-time delivery, but it is not where character identity, prompt logic, or safety policy are defined.

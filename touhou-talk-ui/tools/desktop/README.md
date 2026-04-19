@@ -1,19 +1,29 @@
-# Touhou Talk Desktop (Windows / Electron)
+# Touhou Talk Desktop
 
-This folder contains the Electron wrapper for `touhou-talk-ui`.
+This directory contains the Electron wrapper used to package `touhou-talk-ui` as a Windows desktop application.
 
-Design goals:
+## Quick Read
 
-- Desktop mode is local-only (a shell around the UI)
-- Desktop runtime stores settings under Electron `userData`
-- A bundled `default.env` can ship safe defaults (and is treated as highest priority)
+- Project summary: The desktop packaging layer for the main chat client.
+- Scope: Adapts the web product into a packaged Windows application with controlled runtime environment handling.
+- Technical highlights: Electron shell, dev runner, packaging preparation, and user-data-based env management.
+- Why it matters: The same client experience can be reused beyond the browser without forking the architecture.
 
-## Prerequisites
+## Purpose
 
-- Windows
-- Node.js (LTS)
+The desktop build provides a local application shell around the web client while preserving the same backend-first character architecture used by the browser version.
 
-## Run (dev)
+## What is here
+
+| Path | Role |
+| --- | --- |
+| `main.cjs` | Electron main-process entrypoint |
+| `dev-runner.cjs` | Local development launcher |
+| `prepare-next.cjs` | Build preparation for desktop packaging |
+| `default.env` | Default desktop environment template |
+| `.bundle/` | Files bundled into packaged builds |
+
+## Development
 
 From `touhou-talk-ui/`:
 
@@ -22,41 +32,22 @@ npm install
 npm run desktop:dev
 ```
 
-What `desktop:dev` does:
+`desktop:dev` starts a local Next.js server on an available port, then launches Electron against that local instance.
 
-- Finds a free Next dev port starting from `3000`
-- Starts Next dev via `tools/dev.mjs` (so repo-root `.env` is loaded before SSR/API)
-- Starts Electron with `tools/desktop/main.cjs`
-
-## Desktop env file locations
+## Environment handling
 
 On launch, Electron sets:
 
-- `TOUHOU_DESKTOP_USERDATA_DIR` to the app's `userData` directory
-- `TOUHOU_DESKTOP_ENV_PATH` to the env file used by desktop runtime (`touhou-talk.env`)
+- `TOUHOU_DESKTOP_USERDATA_DIR`
+- `TOUHOU_DESKTOP_ENV_PATH`
 
-Typical dev userData dir:
+The runtime environment file is typically stored in the app `userData` directory as `touhou-talk.env`.
 
-- `%LOCALAPPDATA%/TouhouTalkDesktopDev/` (or `%APPDATA%/...` depending on environment)
+## Packaging note
 
-The env file is:
+Packaged builds can include bundled defaults via `tools/desktop/.bundle/default.env`.
+User environment values only fill missing keys and do not overwrite bundled defaults.
 
-- `<userData>/touhou-talk.env`
+## Security note
 
-## Bundled defaults (`default.env`)
-
-Packaged builds can include a bundled `default.env` at:
-
-- `touhou-talk-ui/tools/desktop/.bundle/default.env`
-
-Electron loads bundled defaults first and treats them as highest priority.
-The user env file is used only to fill missing values (and will not override defaults).
-
-Security note: service role keys are intentionally not loaded from bundled defaults.
-
-## Supabase redirect URLs
-
-Desktop uses a local port (default `3789`, configurable via `TOUHOU_DESKTOP_PORT`).
-Make sure Supabase redirect URLs include:
-
-- `http://localhost:3789/auth/callback`
+Do not ship high-privilege secrets such as service-role credentials in bundled desktop defaults.
