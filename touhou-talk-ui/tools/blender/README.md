@@ -1,49 +1,27 @@
-# Blender tools (VRM scan / idle motion)
+# Blender tools
 
-This folder contains small Blender batch jobs used by `touhou-talk-ui` to:
+This directory contains Blender-related helper scripts and job assets used by the `touhou-talk-ui` workspace.
 
-- Scan a VRM for bones + shape keys (morph targets)
-- Generate a simple "idle breathe" animation and export it as GLB
+## Quick Read
 
-Jobs live under `touhou-talk-ui/tools/blender/jobs/` and are executed via `run.ps1`.
+- Project summary: Blender-side support material for asset preparation workflows.
+- Scope: Keeps content-pipeline tooling separate from runtime and product logic.
+- Technical highlights: Helper scripts and batch/job assets for Blender-oriented processing.
+- Why it matters: Asset preparation remains reproducible and isolated from the application core.
 
-## Prerequisites
+## Purpose
 
-- Windows
-- Blender installed
+These tools support model and asset preparation workflows around the frontend project.
+They are intentionally separate from chat runtime logic.
 
-If `blender.exe` is not found automatically, set:
+## What is here
 
-```powershell
-$env:BLENDER_EXE="C:\\Program Files\\Blender Foundation\\Blender 4.2\\blender.exe"
-```
+| Path | Role |
+| --- | --- |
+| `run.ps1` | Helper entrypoint for local Blender-side tasks |
+| `jobs/` | Job definitions or batch assets for Blender workflows |
 
-## How to run
+## Project position
 
-`run.ps1` resolves input/output paths relative to the repo root.
-
-### 1) Scan a VRM
-
-Produces a JSON containing bone names and mesh shape keys.
-
-```powershell
-pwsh -File touhou-talk-ui/tools/blender/run.ps1 `
-  -Job scan `
-  -Input "touhou-talk-ui/vrm-characters/reimu.vrm" `
-  -Output "touhou-talk-ui/vrm-characters/reimu.scan.json"
-```
-
-### 2) Generate a base idle animation (GLB)
-
-```powershell
-pwsh -File touhou-talk-ui/tools/blender/run.ps1 `
-  -Job idle `
-  -Input "touhou-talk-ui/vrm-characters/reimu.vrm" `
-  -Output "touhou-talk-ui/vrm-characters/motion-library/converted/glb/reimu_idle_breathe.glb"
-```
-
-Notes:
-
-- The current `idle` job is conservative and primarily intended as a baseline for Reimu-like VRMs.
-- VRM is a glTF-based format; these jobs use Blender's glTF importer/exporter (no VRM addon dependency).
-
+Use this directory for content-pipeline work such as model or scene preparation.
+For persona behavior, prompt logic, and runtime control, the authoritative implementation lives in `gensokyo-persona-core`.

@@ -1,65 +1,25 @@
-# Unity retarget tools (Mixamo -> VRM)
+# Unity retarget tools
 
-This folder contains a Unity Editor drop-in used to convert Mixamo humanoid animations into:
+This directory contains Unity-side support files for retargeting and related asset workflows in the `touhou-talk-ui` workspace.
 
-- Baked Transform `.anim` clips (easy to export / consume outside Unity), and optionally
-- `.glb` exports (requires UnityGLTF)
+## Quick Read
 
-The drop-in is under `touhou-talk-ui/tools/unity-retarget/UnityDropIn/` and can be copied into any Unity project.
+- Project summary: Unity-side support for avatar or motion retarget workflows.
+- Scope: Isolates retarget and asset-pipeline concerns from the chat application layers.
+- Technical highlights: Drop-in support files for Unity-based retarget work.
+- Why it matters: Character presentation assets can evolve without polluting runtime/business logic.
 
-## Prerequisites
+## Purpose
 
-- Unity 2022.3 LTS (recommended)
-- A VRM importer (UniVRM) to bring VRM as a Humanoid prefab
-- Mixamo FBX animations imported with Humanoid rig
+The tools here help with motion, rig, or avatar retarget tasks that belong to the asset pipeline rather than the chat runtime.
 
-Optional:
+## What is here
 
-- UnityGLTF (if you want the "Export GLB" option)
+| Path | Role |
+| --- | --- |
+| `UnityDropIn/` | Unity-side files intended to be dropped into a project for retarget work |
 
-## Setup (in Unity)
+## Project position
 
-1) Create/open a Unity project.
-2) Import UniVRM (or your VRM pipeline) and import your VRM as a prefab.
-3) Copy `UnityDropIn/Assets/Editor/` into your project's `Assets/Editor/`.
-4) Import Mixamo FBX files into a folder (example: `Assets/Mixamo/`).
-
-Mixamo import settings (typical):
-
-- `Rig` -> `Animation Type: Humanoid`
-- `Avatar Definition: Create From This Model`
-
-## Bake animations
-
-Open:
-
-- `Tools > Touhou Talk > Mixamo -> VRM Bake`
-
-Fill in:
-
-- `VRM Prefab` (must have an `Animator` with a Humanoid avatar)
-- `Mixamo Folder` (folder containing animation clips / FBX)
-- `Output Folder` (where `.anim` files are written)
-- `Sample FPS` (default 30)
-
-Click "Bake All".
-
-Outputs:
-
-- One baked `.anim` per source clip under `Output Folder`
-- Names include the source asset filename (Mixamo clips often share internal names)
-
-## Fix SkinnedMeshRenderer bindings (common import issue)
-
-If a VRM prefab looks broken or skinning is incorrect, try:
-
-- Select the VRM root object in the Hierarchy
-- Run `Tools > Touhou Talk > Fix SkinnedMeshRenderer Bindings (RootBone/Bones)`
-
-This attempts a best-effort repair of missing `rootBone` / bone references.
-
-## Notes / limitations
-
-- The baked clips are Transform animations; they are intended to be exported/consumed outside Unity.
-- Exporting GLB requires UnityGLTF and is optional.
-
+Use this directory when working on asset-side retargeting or avatar preparation.
+Character response behavior, locale control, and prompt execution remain the responsibility of `gensokyo-persona-core`.

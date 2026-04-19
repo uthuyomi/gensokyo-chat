@@ -1,99 +1,59 @@
 # gensokyo-world-engine
 
-Optional world layer service for Project Sigmaris / Touhou Talk.
+`gensokyo-world-engine` is a support service for world data, lore retrieval, simulation helpers, and story-facing application logic in the `gensokyo-chat` workspace.
+It keeps world-oriented concerns separate from the core character runtime.
 
-This service is responsible for:
+## Quick Read
 
-- Accepting Commands (user intent) and persisting them to Supabase (`world_command_log`)
-- Appending Events (facts) to the ordered event log (`world_event_log`)
-- Serving read APIs for world state / recent events / NPC snapshots (minimal, extensible)
+- Project summary: A dedicated service for world-state, lore, NPC, visit/tick, and story progression concerns.
+- Scope: Keeps world logic outside the character runtime while still making it usable by the product.
+- Technical highlights: World query routes, story/event service flows, and a clean service boundary for ambient context.
+- Why it matters: Character behavior and world-state evolution can grow independently without coupling.
 
-The UI is not coupled to this service directly; real-time consumption is designed to go through the WS gateway (`gensokyo-event-gateway/`).
+## Responsibilities
 
-## Run locally
+- world and lore retrieval support
+- simulation and story helper services
+- knowledge and repository access around setting data
+- world-facing application logic that should not live in the persona backend
 
-### 1) Apply Supabase schema
+## API behavior visible in the code
 
-Run these SQL files in Supabase SQL Editor:
+The current FastAPI service exposes endpoints around:
 
-- `supabase/RESET_TO_COMMON.sql` (shared `common_*`)
-- `supabase/GENSOKYO_WORLD_SCHEMA.sql` (world tables)
+- `GET /health`
+- `GET /world/state`
+- `GET /world/recent`
+- `GET /world/npcs`
+- `POST /world/visit`
+- `POST /world/tick`
+- `POST /world/command`
+- `GET /world/command/{command_id}`
+- `GET /world/commands`
+- `POST /world/emit`
+- `GET /world/knowledge/universe`
+- story state, event history, event creation, event advance, and participation endpoints under `/world/story/*`
 
-### 2) Configure env
+The route layer is explicitly composed from separate router modules for health, commands, events, knowledge, queries, story, visits, and ticks.
+That is a small but useful signal that world concerns are being treated as a service surface rather than a collection of ad hoc helper functions.
 
-The server best-effort loads the repo root `.env` (without overwriting shell env).
+## Directory snapshot
 
-Required:
+| Path | Role |
+| --- | --- |
+| `app/` | Main service implementation |
+| `app/api/routes/` | FastAPI route modules |
+| `content/` | Source content used by the service |
+| `planner/` | Planning-oriented support material |
+| `tools/` | Utility scripts and helpers |
+| `server.py` | Importable service entrypoint |
 
-- `WORLD_SUPABASE_URL` or `SUPABASE_URL`
-- `WORLD_SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_ROLE_KEY`
+## Development
 
-Optional hardening:
+Install dependencies from `requirements.txt`, then run the FastAPI app with your preferred ASGI launcher.
+The service initializes world-engine runtime resources on startup and shuts them down gracefully on exit.
 
-- `GENSOKYO_WORLD_ENGINE_SECRET` (when set, endpoints require header `x-world-secret: <value>`)
+## System boundary
 
-Optional port:
-
-- `GENSOKYO_WORLD_ENGINE_PORT` (default: `8010`)
-- `OPENAI_API_KEY` (when running the embedding worker)
-- `WORLD_EMBEDDING_MODEL` (default: `text-embedding-3-small`)
-- `WORLD_EMBEDDING_BATCH_SIZE` (default: `32`)
-- `WORLD_EMBEDDING_JOB_LIMIT` (default: `128`)
-
-### 3) Install deps & start
-
-```powershell
-cd gensokyo-world-engine
-python -m venv .venv
-./.venv/Scripts/pip install -r requirements.txt
-./.venv/Scripts/python -m uvicorn server:app --host 127.0.0.1 --port 8010
-```
-
-Health: `GET http://127.0.0.1:8010/health`
-
-## Key endpoints
-
-- `POST /world/emit` (append an event)
-- `POST /world/command` (enqueue a command)
-- `POST /world/visit` (enter a location / create visitor snapshot)
-- `POST /world/tick` (time skip / simulation tick)
-- `GET /world/state?world_id=...&location_id=...`
-- `GET /world/recent?world_id=...&location_id=...&limit=...`
-- `GET /world/npcs?world_id=...&location_id=...`
-
-## Command worker
-
-`POST /world/command` persists `world_command_log` with `status=queued`.
-A background worker consumes queued commands, emits corresponding events (`world_event_log`), and updates status to `done/failed`.
-
-Env knobs:
-
-- `GENSOKYO_COMMAND_WORKER_ENABLED=1` (default)
-- `GENSOKYO_COMMAND_WORKER_POLL_MS=500`
-- `GENSOKYO_COMMAND_WORKER_BATCH=20`
-
-## Content (data)
-
-Time skip generation reads repo-local JSON:
-
-- `gensokyo-world-engine/content/locations.json`
-- `gensokyo-world-engine/content/events.json`
-- `gensokyo-world-engine/content/relationships.json`
-
-## World embeddings
-
-When the Supabase world schema includes the vector layer:
-
-- `supabase/world/WORLD_SCHEMA_VECTOR.sql`
-- `supabase/world/WORLD_SEED_VECTOR_BOOTSTRAP.sql`
-
-you can queue searchable world documents and embed them with:
-
-```powershell
-cd gensokyo-world-engine
-./.venv/Scripts/python tools/world_embedding_worker.py --preview 5
-./.venv/Scripts/python tools/world_embedding_worker.py
-```
-
-This reads pending rows from `world_embedding_jobs`, generates embeddings for
-`world_embedding_documents`, and stores them in `world_embeddings`.
+This service may enrich the wider experience with setting and world context, but it does not own character identity.
+Character response strategy, safety overlays, and prompt assembly remain the responsibility of `gensokyo-persona-core`.

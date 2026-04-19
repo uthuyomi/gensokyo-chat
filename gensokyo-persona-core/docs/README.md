@@ -1,39 +1,45 @@
-# gensokyo-persona-core Docs
+# gensokyo-persona-core docs
 
-## 共通キャラクターバックエンド再設計
+This directory collects architecture notes, implementation plans, schema drafts, and migration documents for the character runtime backend.
+It is the best place to understand why the backend is structured the way it is, not just how the code is arranged today.
 
-### 読む順番
+## Quick Read
+
+- Project summary: The design-history and architecture reference for the character runtime backend.
+- Scope: Captures architectural intent, migration direction, and implementation rationale alongside the code.
+- Technical highlights: Design principles, API plans, character-model documentation, and testing/evaluation planning.
+- Why it matters: It shows that the backend was designed deliberately, not only grown by iteration.
+
+## What you will find here
+
+- architecture and design principles
+- character definition and asset model notes
+- API specifications
+- migration and refactor planning
+- testing and evaluation plans
+
+## Suggested reading order
+
 1. `01-overview-and-goals.md`
-2. `02-current-problems.md`
-3. `03-why-python-backend.md`
-4. `04-design-principles.md`
-5. `05-architecture.md`
-6. `06-character-definition-model.md`
-7. `07-dynamic-response-policy.md`
-8. `08-character-maximization-usability-speed.md`
-9. `09-api-and-directory-plan.md`
-10. `10-migration-phases-risks-next-actions.md`
-11. `11-character-profile-schema.md`
-12. `12-response-policy-schema.md`
-13. `13-persona-chat-api-spec.md`
-14. `14-ui-migration-scope.md`
-15. `15-implementation-task-list.md`
-16. `16-test-plan.md`
-17. `17-situation-assessment-schema.md`
-18. `18-situational-behavior-merge-rules.md`
-19. `19-strategy-boundary.md`
-20. `20-prompt-assembler-spec.md`
-21. `21-safety-constraint-matrix.md`
-22. `22-api-schema-contract.md`
+2. `04-design-principles.md`
+3. `05-architecture.md`
+4. `06-character-definition-model.md`
+5. `09-api-and-directory-plan.md`
+6. `11-character-profile-schema.md`
+7. `13-persona-chat-api-spec.md`
+8. `15-implementation-task-list.md`
+9. `16-test-plan.md`
 
-### 補足
-- 既存の統合版メモは `character-backend-redesign-plan.md`
-- 今後はこの分割版を正本として育てる
+## How to use these docs
 
+Start here if you want to understand:
 
-## ???????????
-- ? docs ?? **English control plane + locale style packs** ???????
-- Character Soul / Safety / Situation / Strategy ?????????????????
-- ??????? `ja-JP` / `en-US` ?? locale ??? style profile ???????
-- ?????????????? control plane ??????????????????**?????????? locale profile ???????**?
-- ?????Prompt Assembler / API Contract / Character Schema ? locale ????????????
+- why persona assembly moved from UI to backend
+- how character assets, locale behavior, safety, and strategy fit together
+- which APIs are intended to be shared across clients
+- which parts are stable architecture versus active implementation work
+
+## Reading note
+
+Some documents capture design intent while others capture migration steps from earlier project phases.
+Treat this directory as architecture context and decision history rather than a strict mirror of current code at every line.
